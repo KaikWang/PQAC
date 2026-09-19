@@ -23,3 +23,6 @@ venv/
 *.log
 *.tmp
 *.bak
+
+# Locally cached third-party reference papers
+docs/references/*.pdf
