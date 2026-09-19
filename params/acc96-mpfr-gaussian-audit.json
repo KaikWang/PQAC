@@ -1,0 +1,23 @@
+{
+  "schema": "acc96-mpfr-gaussian-audit-v2",
+  "sigma_max": 6.604996649665436,
+  "support": [
+    -64,
+    64
+  ],
+  "proposal": "sigma-specific Gaussian upper envelope over c in [0,1]",
+  "proposal_scale": 1000000,
+  "proposal_envelope_min": 6.669921,
+  "proposal_envelope_max": 7.605109,
+  "envelope_verified": true,
+  "envelope_argument": "C computes weight[z]=ceil(S*exp(-alpha_lo*d(z,[0,1])^2)) with outward MPFR rounding; therefore weight[z]/S is at least rho_sigma(z-c) for every c in [0,1).",
+  "finite_support_tail_log2_bound_per_call": -425.51255251867013,
+  "finite_support_tail_log2_bound_full_klein": -408.812112800529,
+  "256_bit_threshold_log2_bound_per_call": -248.962799917922,
+  "256_bit_threshold_log2_bound_full_klein": -232.26236019978091,
+  "mpfr_precision_bits": 384,
+  "mpfr_adaptive_precision_limit_bits": 6144,
+  "directed_interval_acceptance": true,
+  "mpfr_rounding_proof_complete": true,
+  "note": "The implementation encloses center, sigma, pi/sigma^2, square, exponential and scaled acceptance probability with directed rounding. A uniform value in the uncertainty band triggers a same-candidate precision doubling, so rounding cannot select a different branch. Production SampleLeft still additionally requires the perturbation sampler and its covariance proof."
+}

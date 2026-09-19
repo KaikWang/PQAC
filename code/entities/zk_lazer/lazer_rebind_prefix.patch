@@ -1,0 +1,10 @@
+--- a/src/labrados/labrados_python.c
++++ b/src/labrados/labrados_python.c
+@@
+-  if(st == NULL || rhs == NULL || static_hash == NULL || count == 0 ||
+-     first + count != st->rqcnst->nsparse) return 1;
++  /* Permit a proper prefix so a caller can retain the intermediate
++   * transcript hash and cheaply rebind a small dynamic tail. */
++  if(st == NULL || rhs == NULL || static_hash == NULL || count == 0 ||
++     first >= st->rqcnst->nsparse ||
++     count > st->rqcnst->nsparse - first) return 1;

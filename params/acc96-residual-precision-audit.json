@@ -1,0 +1,19 @@
+{
+  "scope": "Klein residual-center rounding only",
+  "klein_calls_per_sampleleft": 106496,
+  "sigma_min": 5.669806342346915,
+  "center_lipschitz_upper_bound": 2.6072737823747882,
+  "tested_center_precision_bits": 53,
+  "composed_rounding_error_log2_upper_bound": -34.91701819774433,
+  "target_statistical_bits": 128,
+  "required_center_bits_for_target": 147,
+  "composition_margin_bits": 32,
+  "required_center_bits_with_margin": 179,
+  "recommended_backend_precision_bits": 192,
+  "double_center_is_sufficient": false,
+  "limitations": [
+    "does not cover probability-evaluation rounding inside SampleZ",
+    "does not cover PRNG bias or perturbation sampler arithmetic",
+    "uses a conservative score-function Lipschitz bound"
+  ]
+}

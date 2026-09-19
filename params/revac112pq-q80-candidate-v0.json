@@ -1,0 +1,88 @@
+{
+  "schema": "pqac-integrated-security-candidate-v1",
+  "profile_name": "revac112pq-q80-candidate-v0",
+  "release_status": "candidate",
+  "security_claim_target": {
+    "classical_bits": 128,
+    "quantum_bits": 112,
+    "statistical_bits": 128,
+    "maximum_deletions_per_window": 500
+  },
+  "signature_and_show": {
+    "signature_ring_modulus": 405769,
+    "protocol_security_parameter": 132,
+    "issue_m2": 64,
+    "show_m2": 86,
+    "screen_file": "params/tag-friendly-performance-profile-screen.json",
+    "screened_classical_unforgeability_bits": 128.20144588879234,
+    "screened_classical_anonymity_bits": 128.40848722471034,
+    "screened_quantum_unforgeability_bits": 114.65425610430144,
+    "screened_quantum_anonymity_bits": 121.52875275622274,
+    "projected_show_proof_kib": 63.1829833984375
+  },
+  "accumulator": {
+    "ring_degree": 4096,
+    "module_rows": 1,
+    "crt_factors": [1099511480321, 1099511390209],
+    "modulus": 1208925396278498255577089,
+    "modulus_bits": 80,
+    "gadget_base": 1025,
+    "gadget_signed": true,
+    "gadget_digit_bound": 512,
+    "gadget_digits": 8,
+    "truncated_sampler_base": 13,
+    "truncated_sampler_k": 22,
+    "truncated_sampler_l": 2,
+    "authenticated_random_update_signs": false,
+    "screen_500_file": "params/accumulator-security-screen-gamma500.json",
+    "screen_1000_file": "params/accumulator-security-screen-gamma1000.json",
+    "mlwe_screen_file": "params/accumulator-mlwe-screen-gamma500.json",
+    "beta1_log2_at_500": 73.317,
+    "beta1_log2_at_1000": 74.317,
+    "quantum_core_svp_bits_at_500": 164.7,
+    "quantum_core_svp_bits_at_1000": 158.8,
+    "accumulator_kib": 40.0,
+    "full_witness_mib_projection": 10.859,
+    "ba_mib_projection": 10.0
+  },
+  "composition": {
+    "separate_signature_and_accumulator_rings": true,
+    "same_handle_cross_ring_proof_required": true,
+    "window_identifier_bound_to_credential_and_show": true,
+    "fresh_sync_uses_independent_accumulator_parameters": true
+  },
+  "source_revisions": {
+    "tag_friendly_sampler": "0e67127fab691721064fa2ec9a37c9eb2a914c23",
+    "tag_friendly_lattice_estimator": "352ddaf4a288a0543f5d9eb588d2f89c7acec463",
+    "truncated_sampler": "0068bb7765ce8d34a21385f560e22857d9f14db8",
+    "accumulator_lattice_estimator": "5c9fc14c9a9615f4bfee6419071eefe44807adf3"
+  },
+  "evidence_status": {
+    "balanced_odd_base_python_kat": true,
+    "balanced_odd_base_c_kat": true,
+    "q80_crt_ntt_core": true,
+    "q80_canonical_accumulator_encoding": true,
+    "q80_evalf_evalfx_indicator_tests": true,
+    "q19_accumulator_sampler_constants_regenerated": true,
+    "q19_accumulator_trapdoor_norm_gate": true,
+    "q80_truncated_sampler_parameters_generated": true,
+    "accumulator_msis_screen": true,
+    "accumulator_mlwe_rough_screen": true,
+    "tag_friendly_component_screen": true,
+    "q80_crt_production_arithmetic": false,
+    "q80_labrador_relation": false,
+    "cross_ring_same_handle_reduction": false,
+    "truncated_sampler_reduction_composition": false,
+    "end_to_end_q80_benchmark": false,
+    "independent_cryptographic_review": false
+  },
+  "release_blockers": [
+    "integrate the tested q_acc CRT/NTT core into AccGen, Add and MemVer",
+    "integrate the generated q_acc truncated-sampler implementation and its covariance/statistical loss",
+    "complete the balanced odd-base substitution throughout Theorem 4.3",
+    "prove and parameterize the cross-ring same-handle knowledge relation",
+    "compile Issue m2=64 and Show m2=86 and rerun end-to-end tests",
+    "run q80 worst-case 500/1000 deletion and complete-show benchmarks",
+    "obtain independent cryptographic review"
+  ]
+}

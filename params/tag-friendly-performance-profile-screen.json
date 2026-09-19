@@ -1,0 +1,84 @@
+{
+  "schema": "pqac-tag-friendly-component-screen-v1",
+  "target_quantum_bits": 128.0,
+  "protocol_security_parameter": 132,
+  "cost_model": "realistic_sieving",
+  "rough": false,
+  "quantum_losses_enabled": true,
+  "upstream": "/root/autodl-tmp/tag-friendly-params/parameters_anonymous_credentials.py",
+  "signature": {
+    "n": 256,
+    "d": 4,
+    "q": 405769,
+    "signature_bytes": 3606.625,
+    "signer_mlwe_classical_bits": 151.8188189169476,
+    "signer_mlwe_quantum_bits": 135.391,
+    "user_mlwe_classical_bits": 140.41205015288506,
+    "user_mlwe_quantum_bits": 125.368,
+    "forgery_bits_with_classical_costs": 134.1316499791956,
+    "forgery_bits_with_quantum_costs": 115.68910284546479
+  },
+  "zk_candidates": [
+    {
+      "kind": "issue",
+      "n": 64,
+      "d": 16,
+      "m1": 105,
+      "m2": 64,
+      "q": 228628724346101,
+      "q_bits": 48,
+      "q_min": 228628724346101,
+      "l": 2,
+      "mlwe_classical_bits": 166.4428814349765,
+      "mlwe_quantum_bits": 148.241,
+      "msis_classical_bits": 137.48723764927928,
+      "msis_quantum_bits": 122.798,
+      "soundness_bits": 122.79735893183097,
+      "proof_kib": 26.1976318359375,
+      "crs_kib": 1206.0,
+      "component_screen_pass": false
+    },
+    {
+      "kind": "show",
+      "n": 64,
+      "d": 23,
+      "m1": 151,
+      "m2": 86,
+      "q": 37778924361200852533249,
+      "q_bits": 75,
+      "q_min": 405769,
+      "l": 4,
+      "mlwe_classical_bits": 137.1947563989187,
+      "mlwe_quantum_bits": 122.541,
+      "msis_classical_bits": 179.31205645084194,
+      "msis_quantum_bits": 159.549,
+      "soundness_bits": 133.93363957087487,
+      "proof_kib": 63.1829833984375,
+      "crs_kib": 3697.8515625,
+      "component_screen_pass": false
+    }
+  ],
+  "composition_candidates": [
+    {
+      "issue_m2": 64,
+      "show_m2": 86,
+      "classical": {
+        "anonymity_bits": 128.40848722471034,
+        "unforgeability_bits": 128.20144588879234
+      },
+      "quantum": {
+        "anonymity_bits": 121.52875275622274,
+        "unforgeability_bits": 114.65425610430144
+      },
+      "classical_screen_pass": true,
+      "quantum_screen_pass": false
+    }
+  ],
+  "release_ready": false,
+  "blockers": [
+    "component estimates are not an end-to-end composition bound",
+    "the signature profile must meet the selected end-to-end target",
+    "the accumulator and same-handle reductions must be composed",
+    "candidate constants must be generated, implemented, and regression-tested"
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "schema": "pqac-accumulator-mlwe-screen-v1",
+  "warning": "rough lattice-estimator screen, not an end-to-end security claim",
+  "q": 1208925396278498255577089,
+  "ring_degree": 4096,
+  "module_rows": 1,
+  "trapdoor_cols": 22,
+  "flattened_secret_dimension": 86016,
+  "flattened_samples": 90112,
+  "instances": {
+    "S_inf_1": {
+      "distribution": "D(σ=0.82, μ=0.00)",
+      "attacks": {
+        "usvp": {
+          "rop_log2": 5906.8679999999995,
+          "beta": 20229.0
+        },
+        "dual_hybrid": {
+          "rop_log2": Infinity,
+          "beta": 1753.0
+        }
+      },
+      "best_attack": "usvp",
+      "best_rop_log2": 5906.8679999999995,
+      "best_beta": 20229.0
+    },
+    "B_1": {
+      "distribution": "D(σ=0.50, μ=0.50)",
+      "attacks": {
+        "usvp": {
+          "rop_log2": 5793.864,
+          "beta": 19842.0
+        },
+        "dual_hybrid": {
+          "rop_log2": Infinity,
+          "beta": 1753.0
+        }
+      },
+      "best_attack": "usvp",
+      "best_rop_log2": 5793.864,
+      "best_beta": 19842.0
+    }
+  },
+  "release_ready": false
+}

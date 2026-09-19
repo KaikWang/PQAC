@@ -1,0 +1,56 @@
+{
+  "profile": "revac-q88-window10000-candidate-v1",
+  "status": "implemented-candidate",
+  "accumulator": {
+    "ring_degree": 4096,
+    "modulus_bits": 88,
+    "crt_factors": [1073692673, 536813569, 536690689],
+    "modulus": "309333912899981927159406593",
+    "canonical_coefficient_bytes": 11,
+    "handle_bits": 24,
+    "gadget": {
+      "representation": "balanced-odd-base",
+      "base": 26007,
+      "digits": 6,
+      "digit_bound": 13003
+    },
+    "truncated_sampler": {
+      "base": 13,
+      "k": 24,
+      "l": 2,
+      "right_columns": 22,
+      "statistical_bits": 128,
+      "spectral_slack": 32,
+      "generated_parameters": "acc-truncated-q88-generated.json"
+    }
+  },
+  "window": {
+    "runtime_deletion_limit": 10000,
+    "conditional_arithmetic_limit_beta1_lt_q": 56245,
+    "beta0_log2_at_10000": 74.45794772219865,
+    "beta1_log2_at_10000": 85.50755069848967,
+    "log2_q_over_beta1_at_10000": 2.49174477624301,
+    "public_witness_norm_sq_bound_log2": 148,
+    "note": "The 56245 value is an arithmetic beta1<q screen, not a complete standalone security proof. The runtime window remains 10000."
+  },
+  "proof_layout": {
+    "witness_polynomials_including_fixed_tag": 169,
+    "transmitted_non_tag_polynomials": 168,
+    "witness_radix": 8191,
+    "witness_limbs": 5,
+    "exact_lift_limbs": 7,
+    "wire_version": "RV88-v1"
+  },
+  "size_projection": {
+    "accumulator_kib": 44.0,
+    "transmitted_full_witness_mib": 7.21875,
+    "ba_mib": 6.1875,
+    "delta4_single_worst_case_kib": 516.0,
+    "delta4_accumulated_10000_worst_case_kib": 684.0,
+    "note": "These are canonical/compact representation projections for candidate comparison, not sizeof(C structs)."
+  },
+  "compatibility": {
+    "c_api_prefix": "acc96_",
+    "reason": "Historical symbol names are retained to avoid unrelated anonymous-signature API churn; RV88 wire magics prevent cross-profile decoding."
+  }
+}

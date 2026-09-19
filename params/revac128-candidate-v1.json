@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "profile_name": "revac128-candidate-v1",
+  "release_status": "candidate",
+  "security": {
+    "target_computational_bits": 128,
+    "target_statistical_bits": 128,
+    "signature_query_bound": 4294967296,
+    "derivation_complete": false,
+    "release_blockers": [
+      "the active 19-bit accumulator fails the PKC'26 beta_1 < q condition for a 500-deletion window",
+      "the screened Issue m2=64 and Show m2=86 performance profile is not compiled; the active 58-bit Show modulus is not the selected approximately 75-bit modulus",
+      "the separate theorem-screened q_acc arithmetic and cross-ring relation are not implemented",
+      "the balanced odd-base and truncated-sampler lemmas are not yet composed with the complete accumulator reduction",
+      "the same-handle commitment binding and hiding parameters are not included in a concrete security reduction",
+      "the Labrador grouped-right norm schedule is an implementation policy rather than a proved accumulator bound"
+    ]
+  },
+  "source_bindings": {
+    "params_h_path": "code/entities/common/core/include/params.h",
+    "params_h_sha3_256": "a0e8ede1050d291a94cf9b8f2ec816268b300a2786d71a6d267f0a81f91b397e"
+  },
+  "parameters": {
+    "ring": {
+      "n": 256,
+      "d": 4,
+      "q": 405769,
+      "q_bitlen": 19
+    },
+    "signature": {
+      "q_low": 2401,
+      "q_high": 169,
+      "base_low": 49,
+      "base_high": 13,
+      "dim_low": 2,
+      "dim_high": 2,
+      "message_slots": 10,
+      "tag_weight": 5
+    },
+    "issue_proof_compiled": {
+      "n": 64,
+      "module_rank": 20,
+      "q": 212704515569,
+      "q_bitlen": 38,
+      "witness_polynomials": 104,
+      "randomness_polynomials": 58,
+      "soundness_repetitions": 7,
+      "challenge_rho": 8,
+      "challenge_eta": 93
+    },
+    "show_proof_compiled": {
+      "n": 64,
+      "module_rank": 23,
+      "q": 216093359578546177,
+      "q_bitlen": 58,
+      "witness_polynomials": 183,
+      "randomness_polynomials": 74,
+      "soundness_repetitions": 4,
+      "challenge_rho": 8,
+      "challenge_eta": 93,
+      "compression_gamma": 1073741824,
+      "ordinary_rejection_sampling": true,
+      "same_handle_link_randomness_polynomials": 32
+    },
+    "same_handle_commitment": {
+      "opening_vectors": 2,
+      "opening_dimension": 4,
+      "opening_distribution": "binary",
+      "opening_poly_norm_sq": 256,
+      "matrix_a_domain_separator": 29,
+      "matrix_d_domain_separator": 30,
+      "randomness_domain_separator": 31
+    },
+    "accumulator": {
+      "handle_bits": 32,
+      "gadget_base": 3,
+      "gadget_signed": true,
+      "authenticated_random_update_signs": false,
+      "randomized_witness_refresh": false,
+      "gadget_dim": 12,
+      "truncated_sampler_base": 14,
+      "truncated_sampler_k": 5,
+      "truncated_sampler_l": 2,
+      "max_dictionary_entries": 128,
+      "max_deletions_storage": 128,
+      "witness_beta_sq_policy": 9223372036854775807
+    },
+    "labrador_memver": {
+      "proof_modulus_bits": 38,
+      "proof_modulus": 274877906837,
+      "linear_decomposition_base": 256,
+      "linear_decomposition_chunks": 4,
+      "small_chunk_norm_sq": 4194304,
+      "tag_norm_sq": 1,
+      "v2_norm_sq": 268435456,
+      "right_fresh_group_norm_sq": 8192,
+      "right_group_norm_sq_per_deletion": 16777216,
+      "right_group_norm_sq_max": 1073741824,
+      "prover_zero_knowledge": true,
+      "right_layout": "grouped"
+    },
+    "system": {
+      "public_delta_layers": 4,
+      "private_delta_layers": 6,
+      "bml_capacity": 20,
+      "seed_bytes": 32,
+      "show_nonce_bytes": 32,
+      "sync_nonce_bytes": 32,
+      "parameter_hash_bytes": 32,
+      "context_wire_version": 3,
+      "sync_wire_version": 2,
+      "show_packet_encoding_version": 2,
+      "labrador_raw_encoding_version": 2,
+      "labrador_compact_encoding_version": 3,
+      "labrador_worker_protocol_version": 3
+    }
+  }
+}

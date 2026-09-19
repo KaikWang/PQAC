@@ -1,0 +1,25 @@
+# CMake build trees and generated test state
+code/entities/build*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/CTestTestfile.cmake
+**/Testing/
+
+# Python caches and local environments
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Local logs and temporary files
+*.log
+*.tmp
+*.bak
