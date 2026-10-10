@@ -204,3 +204,41 @@ def build_full_q88_manifest(relation: EffectiveLaneRelation) -> FullQ88BridgeMan
     )
     manifest.validate()
     return manifest
+
+
+def build_auxiliary_product_witnesses(public: Any, prover: Any,
+                                      relation: EffectiveLaneRelation) -> tuple[
+                                          tuple[tuple[int, ...], ...],
+                                          tuple[tuple[int, ...], ...]]:
+    """Compute hidden handle and refresh product witnesses for bridge binding.
+
+    This reference path is intentionally independent of the native Pack
+    backend.  The native adapter must digit-decompose these exact integer
+    polynomials and prove their binding equations; it may not substitute the
+    effective coefficients from ``build_effective_lane_relation``.
+    """
+    from q88_bridge_core import aggregate_handle_witness, negacyclic_mul
+
+    degree = len(relation.witness[0])
+    right_offset = 2 + TRUNC_RIGHT
+    right_polys = relation.witness[right_offset:
+                                   right_offset + HANDLE_BITS * GADGET_DIGITS]
+    aggregate = aggregate_handle_witness(
+        right_polys, prover.handle_vector, gadget_base=GADGET_BASE,
+        gadget_digits=GADGET_DIGITS)
+    refresh_products: list[tuple[int, ...]] = []
+    for block in range(REFRESH_BLOCKS):
+        composed = list(public.refresh(0, block))
+        for bit, selected in enumerate(prover.refresh_r_bits):
+            if selected:
+                row = public.refresh(bit + 1, block)
+                composed = [(left + right) % Q96
+                            for left, right in zip(composed, row)]
+        z = relation.witness[right_offset + HANDLE_BITS * GADGET_DIGITS + block]
+        # The reference product is exact integer negacyclic multiplication.
+        refresh_products.append(tuple(negacyclic_mul(
+            [_center_lane(value, 0) for value in composed], z)))
+    if len(aggregate) != degree:
+        raise ValueError("q88 handle product degree mismatch")
+    return (tuple(tuple(aggregate) for _ in range(3)),
+            tuple(refresh_products))
