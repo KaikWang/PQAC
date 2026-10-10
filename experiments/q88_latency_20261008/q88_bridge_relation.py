@@ -139,3 +139,59 @@ def verify_selected_coefficients(relation: EffectiveLaneRelation,
             if value != relation.target[lane][output]:
                 raise ValueError(f"q88 effective bridge mismatch lane={lane} "
                                  f"coeff={output}")
+
+@dataclass(frozen=True)
+class FullQ88BridgeManifest:
+    """Security-complete inventory consumed by the native bridge builder."""
+    witness_slots: tuple[int, ...]
+    handle_auxiliary_slots: tuple[int, ...]
+    refresh_auxiliary_slots: tuple[int, ...]
+    accumulator_lift_slots: tuple[tuple[int, ...], ...]
+    accumulator_lane_count: int
+    handle_binding_equations: int
+    refresh_binding_equations: int
+    link_binding_equations: int
+
+    def validate(self) -> None:
+        if self.accumulator_lane_count != 3:
+            raise ValueError("q88 bridge must retain all three accumulator lanes")
+        if len(self.handle_auxiliary_slots) != HANDLE_BITS * GADGET_DIGITS:
+            raise ValueError("q88 bridge handle auxiliary columns incomplete")
+        if len(self.refresh_auxiliary_slots) != REFRESH_BLOCKS:
+            raise ValueError("q88 bridge refresh auxiliary columns incomplete")
+        if len(self.accumulator_lift_slots) != 3:
+            raise ValueError("q88 bridge lift lanes incomplete")
+        if self.handle_binding_equations < HANDLE_BITS:
+            raise ValueError("q88 bridge handle binding equations incomplete")
+        if self.refresh_binding_equations < REFRESH_BITS:
+            raise ValueError("q88 bridge refresh binding equations incomplete")
+        if self.link_binding_equations < 4:
+            raise ValueError("q88 bridge q19 link equations incomplete")
+
+
+def build_full_q88_manifest(relation: EffectiveLaneRelation) -> FullQ88BridgeManifest:
+    """Return the complete constraint inventory for one q88 accumulator.
+
+    This function deliberately does not make hidden effective coefficients
+    public.  It separates the columns that need auxiliary binding from the
+    main relation so the native builder cannot accidentally create the unsafe
+    fixed-handle shortcut used by early prototypes.
+    """
+    relation_slots = relation.witness_slots
+    handle_start = 2 + TRUNC_RIGHT
+    handle_count = HANDLE_BITS * GADGET_DIGITS
+    handle_slots = relation_slots[handle_start:handle_start + handle_count]
+    refresh_slots = relation_slots[handle_start + handle_count:]
+    manifest = FullQ88BridgeManifest(
+        witness_slots=relation_slots,
+        handle_auxiliary_slots=tuple(handle_slots),
+        refresh_auxiliary_slots=tuple(refresh_slots),
+        accumulator_lift_slots=tuple(
+            tuple(range(lane * 7, lane * 7 + 7)) for lane in range(3)),
+        accumulator_lane_count=3,
+        handle_binding_equations=HANDLE_BITS,
+        refresh_binding_equations=REFRESH_BITS,
+        link_binding_equations=4,
+    )
+    manifest.validate()
+    return manifest
