@@ -499,8 +499,8 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
             for index, values in enumerate(block):
                 pv[index] = poly_t(ring, values)
             vectors.append(pv)
-            norms.append(max(1, sum(value * value for values in poly
-                                    for poly in block)))
+            norms.append(max(1, sum(value * value for poly in block
+                                    for value in poly)))
             witness_refs.append(("w", layer, start))
     for layer, values in enumerate(bridge.quotient_digits):
         pv = polyvec_t(ring, 1)
