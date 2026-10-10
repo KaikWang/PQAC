@@ -80,6 +80,27 @@ before relation checking. The prototype was removed from the active source;
 the next implementation must add a native mixed-degree sparse helper in the
 LaBRADOR bridge before this optimization can be evaluated.
 
+## q88 bridge shape audit
+
+The new `q88_bridge_shape.py` audit applies the Lazer-Acc layout to the actual
+q88 profile without changing production code. It combines the three CRT
+moduli into an 88-bit integer modulus, keeps the existing 50,000-deletion
+witness gate, and uses radix 128 with groups of 12 polynomials. The initial
+shape estimate is:
+
+```text
+public digits       13
+witness digits       9  (58-bit conservative gate)
+quotient digits     12  (79-bit preliminary bound)
+carry layers        25
+grouped vectors    168  (before refresh, handle, and link constraints)
+```
+
+This is the first q88-specific estimate in the same direction as the 126 KiB
+Lazer-Acc construction. The quotient and carry bounds are deliberately
+conservative estimates until the CRT-combined public polynomial compiler is
+implemented; this is not yet a proof-size claim.
+
 ## Conclusion and next implementation boundary
 
 The Lazer-Acc ideas are applicable, but the safe transplant is not a simple
