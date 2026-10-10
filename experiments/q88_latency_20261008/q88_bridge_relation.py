@@ -266,9 +266,8 @@ class AuxiliaryDigitWitness:
                        zip(rebuild(layers), rebuild(layers))):
                     raise ValueError("q88 handle digit rebuild failed")
         for lane in self.refresh_digits:
-            for block in lane:
-                for layers in block:
-                    rebuild(layers)
+            for layers in lane:
+                rebuild(layers)
 
 
 def _balanced_layers(poly: tuple[int, ...], *, base: int,
