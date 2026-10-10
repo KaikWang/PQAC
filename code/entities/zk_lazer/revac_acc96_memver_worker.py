@@ -148,6 +148,10 @@ def _apply_phase_thread_budget(phase: str) -> None:
 os.environ.setdefault("REVAC_Q96_COMPACT_WITNESS_LIMBS", "1")
 os.environ.setdefault("REVAC_Q96_COMPACT_WITNESS_COUNT", "4")
 os.environ.setdefault("REVAC_Q96_COMPACT_WITNESS_RADIX", "32767")
+# The refresh selector is a scalar bit vector.  Keeping it in the base ring
+# preserves the exact relation while avoiding sixteen redundant degree-256
+# phases in the full-ring Pack statement.
+os.environ.setdefault("REVAC_Q96_SCALAR_REFRESH_BITS", "1")
 os.environ.setdefault("REVAC_LABRADOR_PACK_IMPROVE_THRESHOLD", "0.50")
 
 from revac_acc96_memver_labrador import (

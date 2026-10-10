@@ -41,7 +41,9 @@ encoding also contribute.  Therefore removing vectors alone does not imply a
 `REVAC_Q96_SCALAR_REFRESH_BITS=1` is relation-preserving: it keeps the hidden
 refresh selector as degree-zero data.  One complete remote show passed with
 4.716 s prove, 2.645 s verify, and **193.75 KiB** envelope.  This is a small
-size change, so it is retained only as a valid optional optimization.
+size change, so it is retained as the default optional optimization.  A second
+two-show run produced 193.78 KiB for both proofs, with prove times 5.469/4.653 s
+and verify times 2.562/2.555 s; both Pack verifications passed.
 
 `REVAC_Q96_DIRECT_RIGHT_QUAD=1` substitutes the right-side aggregation equality
 directly into the quadratic relation and removes 4,608 auxiliary vectors in
