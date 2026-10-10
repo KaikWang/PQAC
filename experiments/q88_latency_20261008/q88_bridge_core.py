@@ -475,3 +475,92 @@ def append_native_binding_plan(statement, ring, plan,
                             [-constraint.base] + [0] * (ring.deg - 1)))
         witnesses.append(carry_indices[constraint.layer])
         statement.append_statement(terms, witnesses, zero)
+
+
+def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
+                                 zk: bool = True):
+    """Build one grouped native Pack statement from a verified Bridge."""
+    from lazer import poly_t, polyvec_t, polyring_t
+    from labrados import proof_statement
+    if group_size <= 0:
+        raise ValueError("group size must be positive")
+    degree = bridge.degree
+    ring = polyring_t(degree, PACK_MODULUS)
+    vectors = []
+    norms = []
+    witness_refs = []
+    columns = len(bridge.w_digits)
+    for layer in range(len(bridge.w_digits[0])):
+        for start in range(0, columns, group_size):
+            block = [bridge.w_digits[col][layer]
+                     for col in range(start, min(start + group_size, columns))]
+            pv = polyvec_t(ring, len(block))
+            for index, values in enumerate(block):
+                pv[index] = poly_t(ring, values)
+            vectors.append(pv)
+            norms.append(max(1, sum(value * value for values in poly
+                                    for poly in block)))
+            witness_refs.append(("w", layer, start))
+    for layer, values in enumerate(bridge.quotient_digits):
+        pv = polyvec_t(ring, 1)
+        pv[0] = poly_t(ring, values)
+        vectors.append(pv)
+        norms.append(max(1, sum(value * value for value in values)))
+        witness_refs.append(("q", layer, 0))
+    for layer, values in enumerate(bridge.carry_digits):
+        pv = polyvec_t(ring, 1)
+        pv[0] = poly_t(ring, values)
+        vectors.append(pv)
+        norms.append(max(1, sum(value * value for value in values)))
+        witness_refs.append(("c", layer, 0))
+    if any(value >= (1 << 64) for value in norms):
+        raise ValueError("grouped Pack norm exceeds uint64")
+    equation_count = bridge.equation_count()
+    statement = proof_statement(
+        [degree] * len(vectors), [vector.dim for vector in vectors], norms,
+        num_constraints=equation_count, primesize="38", zk=zk)
+    indices = [statement.append_witness(vector) for vector in vectors]
+    ref_to_index = {ref: index for ref, index in zip(witness_refs, indices)}
+    zero = poly_t(ring, [0] * degree)
+    base_digits = [
+        [((bridge.q_digits[layer] >> (7 * digit)) & 127)
+         for _ in range(degree)]
+        for layer in range(len(bridge.q_digits))
+        for digit in []
+    ]
+    # Public modulus digits are already stored as scalar coefficients in q_digits.
+    for layer in range(equation_count):
+        terms = []
+        witnesses = []
+        for col in range(columns):
+            for public_layer in range(len(bridge.h_digits[col])):
+                witness_layer = layer - public_layer
+                if not 0 <= witness_layer < len(bridge.w_digits[col]):
+                    continue
+                if col % group_size:
+                    continue
+                start = col
+                end = min(start + group_size, columns)
+                block = [bridge.h_digits[index][public_layer]
+                         for index in range(start, end)]
+                pv = polyvec_t(ring, len(block))
+                for index, values in enumerate(block):
+                    pv[index] = poly_t(ring, values)
+                terms.append(pv)
+                witnesses.append(ref_to_index[("w", witness_layer, start)])
+                break
+        for q_layer, modulus_digit in enumerate(bridge.q_digits):
+            quotient_layer = layer - q_layer
+            if 0 <= quotient_layer < len(bridge.quotient_digits):
+                terms.append(poly_t(ring, [-modulus_digit] + [0] * (degree - 1)))
+                witnesses.append(ref_to_index[("q", quotient_layer, 0)])
+        if layer:
+            terms.append(poly_t(ring, [1] + [0] * (degree - 1)))
+            witnesses.append(ref_to_index[("c", layer - 1, 0)])
+        terms.append(poly_t(ring, [-bridge.base] + [0] * (degree - 1)))
+        witnesses.append(ref_to_index[("c", layer, 0)])
+        rhs = bridge.target_digits[layer] if layer < len(bridge.target_digits) else [0] * degree
+        statement.append_statement(terms, witnesses, poly_t(ring, rhs))
+    if int(statement.simple_verify(statement.statement, statement.witness)) != 1:
+        raise ValueError("grouped Pack statement clear verification failed")
+    return statement, ref_to_index
