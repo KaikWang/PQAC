@@ -447,3 +447,31 @@ def make_native_binding_plan(binding: DigitBinding,
                                ([1] if previous is not None else []) +
                                [-binding.base])))
     return tuple(result)
+
+
+def append_native_binding_plan(statement, ring, plan,
+                               *, input_indices: Sequence[int],
+                               output_indices: Sequence[int],
+                               carry_indices: Sequence[int]) -> None:
+    """Append digit binding constraints to a LaZer proof statement.
+
+    ``statement`` is the existing ``labrados.proof_statement`` object and all
+    indices are already allocated witness vectors.  Coefficients are constant
+    ring polynomials, so this helper cannot silently introduce a hidden
+    effective public coefficient.
+    """
+    from lazer import poly_t
+    one = poly_t(ring, [1] + [0] * (ring.deg - 1))
+    zero = poly_t(ring, [0] * ring.deg)
+    for constraint in plan:
+        terms = [one for _ in constraint.input_indices]
+        witnesses = [input_indices[index] for index in constraint.input_indices]
+        terms.append(poly_t(ring, [-1] + [0] * (ring.deg - 1)))
+        witnesses.append(output_indices[constraint.layer])
+        if constraint.previous_carry_index is not None:
+            terms.append(one)
+            witnesses.append(carry_indices[constraint.previous_carry_index])
+        terms.append(poly_t(ring,
+                            [-constraint.base] + [0] * (ring.deg - 1)))
+        witnesses.append(carry_indices[constraint.layer])
+        statement.append_statement(terms, witnesses, zero)
