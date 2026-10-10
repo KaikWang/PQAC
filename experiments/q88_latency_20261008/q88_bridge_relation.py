@@ -337,18 +337,10 @@ def build_safe_main_relation(public: Any, prover: Any,
     witness_slots = list(relation.witness_slots)
     # Aggregate and product witnesses are appended after the wire witnesses.
     aggregate_slot = max(witness_slots) + 1
-    product_slots = tuple(aggregate_slot + 1 + lane * REFRESH_BLOCKS + block
-                          for lane in range(3)
+    product_slots = tuple(aggregate_slot + 1 + block
                           for block in range(REFRESH_BLOCKS))
     common_witness = list(relation.witness[:2 + TRUNC_RIGHT]) + list(relation.witness[2 + TRUNC_RIGHT:2 + TRUNC_RIGHT + HANDLE_BITS * GADGET_DIGITS]) + [tuple(handle_product)]
     common_witness.extend(tuple(refresh_product[0][block])
-                          for block in range(REFRESH_BLOCKS))
-    # Products are mathematically common integer witnesses.  Lane copies are
-    # indexed separately in the native statement when their public residues
-    # are constrained.
-    common_witness.extend(tuple(refresh_product[1][block])
-                          for block in range(REFRESH_BLOCKS))
-    common_witness.extend(tuple(refresh_product[2][block])
                           for block in range(REFRESH_BLOCKS))
     columns_by_lane = []
     for lane in range(3):
@@ -365,17 +357,15 @@ def build_safe_main_relation(public: Any, prover: Any,
         one = [0] * degree
         one[0] = -1
         columns.append(one)
-        for product_lane in range(3):
-            for block in range(REFRESH_BLOCKS):
-                one = [0] * degree
-                if product_lane == lane:
-                    one[0] = 1
-                columns.append(one)
+        for block in range(REFRESH_BLOCKS):
+            one = [0] * degree
+            one[0] = 1
+            columns.append(one)
         columns_by_lane.append(tuple(tuple(column) for column in columns))
     safe_slots = tuple(witness_slots[:2 + TRUNC_RIGHT]) + (aggregate_slot,) + product_slots
-    product_indices_by_lane = tuple(tuple(2 + TRUNC_RIGHT + 1 + lane * REFRESH_BLOCKS + block
+    product_indices_by_lane = tuple(tuple(2 + TRUNC_RIGHT + 1 + block
                                           for block in range(REFRESH_BLOCKS))
-                                    for lane in range(3))
+                                    for _lane in range(3))
     targets = relation.target
     return SafeMainRelation(tuple(columns_by_lane), tuple(common_witness),
                             targets, safe_slots, product_indices_by_lane)
