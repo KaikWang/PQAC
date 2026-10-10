@@ -10,7 +10,7 @@ from q88_bridge_core import (CRT_MODULUS, LANE_MODULI,
 
 
 def main() -> None:
-    witness = [[1, -2, 3, 0, 0, 0, 0, 0]]
+    witness = [[2, -2, 3, 0, 0, 0, 0, 0]]
     # Pick a canonical 88-bit coefficient close to M.  Multiplying by two
     # then wraps once, so the KAT exercises a nonzero quotient digit.
     matrix = [CRT_MODULUS - 5] + [0] * 7
