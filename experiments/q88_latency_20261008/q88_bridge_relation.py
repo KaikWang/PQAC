@@ -15,11 +15,26 @@ try:
 except ImportError:
     from q88_bridge_core import LANE_MODULI
 
-from code.entities.zk_lazer.revac_acc96_wire import (
-    GADGET_BASE, GADGET_DIGITS, HANDLE_BITS, MODULI, REFRESH_BITS,
-    REFRESH_BLOCKS, REFRESH_Z_FIRST_SLOT, TAG_SLOT, TRUNC_BASE,
-    TRUNC_RIGHT, _center_lane,
-)
+
+MODULI = LANE_MODULI
+Q96 = 1
+for _modulus in MODULI:
+    Q96 *= _modulus
+HANDLE_BITS = 24
+GADGET_BASE = 26007
+GADGET_DIGITS = 6
+TRUNC_BASE = 13
+TRUNC_RIGHT = 22
+REFRESH_BITS = 128
+REFRESH_BLOCKS = GADGET_DIGITS
+REFRESH_Z_FIRST_SLOT = 169
+TAG_SLOT = 24
+
+def _center_lane(value: int, lane: int) -> int:
+    modulus = MODULI[lane]
+    value = int(value) % modulus
+    return value - modulus if value > modulus // 2 else value
+
 
 
 @dataclass(frozen=True)
@@ -88,7 +103,7 @@ def build_effective_lane_relation(public: Any, prover: Any) -> EffectiveLaneRela
             for bit, selected in enumerate(prover.refresh_r_bits):
                 if selected:
                     selected_poly = refresh[(bit + 1, block)]
-                    composed = [(left + right) % (1 << 88)
+                    composed = [(left + right) % Q96
                                 for left, right in zip(composed,
                                                        selected_poly)]
             columns.append([_center_lane(value, lane) for value in composed])
