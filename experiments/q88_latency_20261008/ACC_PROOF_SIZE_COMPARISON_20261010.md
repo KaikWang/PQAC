@@ -65,6 +65,12 @@ the outer envelope or removing metadata therefore cannot provide a meaningful
 reduction; the next reduction must lower valid Pack parameter dimensions or
 replace the current CRT/lift layout with a compact quotient/carry statement.
 
+Changing the handle aggregation chunks from the default 16+8 split to three
+rank-8 chunks did pass clear relation checking and Pack Verify, but produced the
+same **194.03 KiB** envelope while increasing the one-show measurement to
+6.236 s prove and 3.128 s verify. It is therefore rejected as a size
+optimization.
+
 ## Conclusion and next implementation boundary
 
 The Lazer-Acc ideas are applicable, but the safe transplant is not a simple
