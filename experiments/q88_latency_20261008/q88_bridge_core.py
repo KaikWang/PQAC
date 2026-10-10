@@ -519,7 +519,7 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
     equation_count = bridge.equation_count()
     statement = proof_statement(
         [degree] * len(vectors), [vector.dim for vector in vectors], norms,
-        num_constraints=equation_count, primesize="38", zk=zk, debug=True)
+        num_constraints=equation_count, primesize="38", zk=zk)
     indices = [statement.append_witness(vector) for vector in vectors]
     ref_to_index = {ref: index for ref, index in zip(witness_refs, indices)}
     zero = poly_t(ring, [0] * degree)
