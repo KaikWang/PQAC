@@ -301,9 +301,8 @@ def digitize_auxiliary_products(handle_products: tuple[tuple[int, ...], ...],
                                                   digits=digits)
                                 for poly in lane)
                          for lane in handle_products)
-    refresh_digits = tuple(tuple(tuple(_balanced_layers(
-        poly, base=base, digits=digits) for poly in block)
-                              for block in lane)
+    refresh_digits = tuple(tuple(_balanced_layers(
+        poly, base=base, digits=digits) for poly in lane)
                           for lane in refresh_products)
     result = AuxiliaryDigitWitness(base, handle_digits, refresh_digits)
     result.verify()
