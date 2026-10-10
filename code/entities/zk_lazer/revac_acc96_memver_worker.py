@@ -294,7 +294,7 @@ def prove(dynamic: bytes, entry: dict[str, Any],
     if link.accumulator_digest != prover.accumulator_digest:
         raise ValueError("q96 link/prover accumulator digest mismatch")
     bridge_dump = os.environ.get("REVAC_Q96_EXPERIMENT_INPUT_DUMP")
-    if bridge_dump:
+    if bridge_dump and not reuse:
         dump_dir = pathlib.Path(bridge_dump)
         dump_dir.mkdir(parents=True, exist_ok=True)
         (dump_dir / "prover_link.bin").write_bytes(dynamic)
