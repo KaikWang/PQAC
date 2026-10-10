@@ -343,7 +343,7 @@ def build_safe_main_relation(public: Any, prover: Any,
     product_slots = tuple(aggregate_slot + 1 + lane * REFRESH_BLOCKS + block
                           for lane in range(3)
                           for block in range(REFRESH_BLOCKS))
-    common_witness = list(relation.witness[:2 + TRUNC_RIGHT]) + [tuple(handle_product)]
+    common_witness = list(relation.witness[:2 + TRUNC_RIGHT]) + list(relation.witness[2 + TRUNC_RIGHT:2 + TRUNC_RIGHT + HANDLE_BITS * GADGET_DIGITS]) + [tuple(handle_product)]
     common_witness.extend(tuple(refresh_product[0][block])
                           for block in range(REFRESH_BLOCKS))
     # Products are mathematically common integer witnesses.  Lane copies are
