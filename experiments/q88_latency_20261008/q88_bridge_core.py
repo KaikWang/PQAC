@@ -565,3 +565,70 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
     if int(statement.simple_verify(statement.statement, statement.witness)) != 1:
         raise ValueError("grouped Pack statement clear verification failed")
     return statement, ref_to_index
+
+
+def compile_linear_crt_bridge_fast(matrix, witness, target, *,
+                                   base: int = 128,
+                                   witness_digits: int = 9,
+                                   quotient_digits: int = 16):
+    """FFT-assisted exact lift compiler for degree-4096 q88 experiments.
+
+    The FFT is used only to construct integer products and carries; the native
+    Pack statement still proves the resulting digit equations.  The helper is
+    optional so the small reference compiler remains dependency-free.
+    """
+    if base != 128:
+        raise ValueError("fast q88 bridge currently requires radix 128")
+    try:
+        from exact_negacyclic_fft import digit_sum_negacyclic
+    except ImportError as exc:
+        raise RuntimeError("exact_negacyclic_fft is required for fast bridge") from exc
+    if len(matrix) != len(LANE_MODULI) or len(target) != len(LANE_MODULI):
+        raise ValueError("q88 fast bridge expects three lanes")
+    columns = len(witness)
+    degree = len(witness[0])
+    lifted_matrix = [crt_lift_polynomial([matrix[lane][column]
+                                           for lane in range(3)])
+                     for column in range(columns)]
+    lifted_target = crt_lift_polynomial(target)
+    conv = digit_sum_negacyclic(lifted_matrix, witness, 7,
+                                 (CRT_MODULUS.bit_length() + 6) // 7,
+                                 witness_digits)
+    total = [sum(conv[layer][k] * (base ** layer)
+                 for layer in range(len(conv))) for k in range(degree)]
+    quotient = []
+    for value, rhs in zip(total, lifted_target):
+        diff = value - rhs
+        if diff % CRT_MODULUS:
+            raise ValueError("q88 fast bridge congruence failed")
+        quotient.append(diff // CRT_MODULUS)
+    h_count = (CRT_MODULUS.bit_length() + 6) // 7
+    h = [decompose_polynomial(poly, base, h_count, False)
+         for poly in lifted_matrix]
+    w = [decompose_polynomial(poly, base, witness_digits, True)
+         for poly in witness]
+    q_digits = unsigned_digits(CRT_MODULUS, base, h_count)
+    t = decompose_polynomial(lifted_target, base, h_count, False)
+    q_layers = decompose_polynomial(quotient, base, quotient_digits, True)
+    layer_count = max(len(conv), h_count + quotient_digits - 1) + 1
+    carries = []
+    previous = [0] * degree
+    for layer in range(layer_count):
+        expression = previous[:]
+        if layer < len(conv):
+            expression = [x + y for x, y in zip(expression, conv[layer])]
+        for i, qdigit in enumerate(q_digits):
+            j = layer - i
+            if 0 <= j < quotient_digits:
+                expression = [x - qdigit * y for x, y in
+                              zip(expression, q_layers[j])]
+        if layer < len(t):
+            expression = [x - y for x, y in zip(expression, t[layer])]
+        if any(value % base for value in expression):
+            raise ValueError(f"q88 fast bridge carry {layer} is not integral")
+        previous = [value // base for value in expression]
+        carries.append(previous)
+    if any(previous):
+        raise ValueError("q88 fast bridge terminal carry is nonzero")
+    bridge = Bridge(degree, base, h, w, q_digits, q_layers, t, carries, {})
+    return bridge

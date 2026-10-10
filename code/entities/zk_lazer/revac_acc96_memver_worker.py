@@ -293,6 +293,14 @@ def prove(dynamic: bytes, entry: dict[str, Any],
         link = LinkPayload.decode(dynamic[PROVER_BYTES:])
     if link.accumulator_digest != prover.accumulator_digest:
         raise ValueError("q96 link/prover accumulator digest mismatch")
+    bridge_dump = os.environ.get("REVAC_Q96_EXPERIMENT_INPUT_DUMP")
+    if bridge_dump:
+        dump_dir = pathlib.Path(bridge_dump)
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        (dump_dir / "prover_link.bin").write_bytes(dynamic)
+        public_raw = entry.get("public_raw")
+        if public_raw is not None:
+            (dump_dir / "public.bin").write_bytes(public_raw)
     request_profile_id = _bind_deployment_profile(
         entry, link.context_hash, link.parameter_digest, link.window_id,
         prover.sequence, link.accumulator_digest)
@@ -568,6 +576,7 @@ def serve(path: str, cache_limit: int, max_requests: int = 0) -> int:
                         raise ValueError("q96 public parameter identifier mismatch")
                     entry = {
                         "pp_id": pp_id,
+                        "public_raw": public_raw,
                         "public": PublicParameters.decode(public_raw),
                         "prove_statement": Q96StatementCache(),
                         "verify_statement": Q96StatementCache(),
