@@ -229,18 +229,20 @@ def build_auxiliary_product_witnesses(public: Any, prover: Any,
     aggregate = aggregate_handle_witness(
         right_polys, prover.handle_vector, gadget_base=GADGET_BASE,
         gadget_digits=GADGET_DIGITS)
-    refresh_products: list[tuple[int, ...]] = []
-    for block in range(REFRESH_BLOCKS):
-        composed = list(public.refresh(0, block))
-        for bit, selected in enumerate(prover.refresh_r_bits):
-            if selected:
-                row = public.refresh(bit + 1, block)
-                composed = [(left + right) % Q96
-                            for left, right in zip(composed, row)]
-        z = relation.witness[right_offset + HANDLE_BITS * GADGET_DIGITS + block]
-        # The reference product is exact integer negacyclic multiplication.
-        refresh_products.append(tuple(negacyclic_mul(
-            [_center_lane(value, 0) for value in composed], z)))
+    refresh_products: list[tuple[tuple[int, ...], ...]] = []
+    for lane in range(3):
+        lane_products: list[tuple[int, ...]] = []
+        for block in range(REFRESH_BLOCKS):
+            composed = list(public.refresh(0, block))
+            for bit, selected in enumerate(prover.refresh_r_bits):
+                if selected:
+                    row = public.refresh(bit + 1, block)
+                    composed = [(left + right) % Q96
+                                for left, right in zip(composed, row)]
+            z = relation.witness[right_offset + HANDLE_BITS * GADGET_DIGITS + block]
+            lane_products.append(tuple(negacyclic_mul(
+                [_center_lane(value, lane) for value in composed], z)))
+        refresh_products.append(tuple(lane_products))
     if len(aggregate) != degree:
         raise ValueError("q88 handle product degree mismatch")
     return (tuple(tuple(aggregate) for _ in range(3)),
