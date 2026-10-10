@@ -52,6 +52,19 @@ new valid norm/split bound would be unsafe.
 
 Enabling both switches fails at parameter generation for the same reason.
 
+The existing three-limb compact experiment was also tested with its exact
+capacity setting (`radix=1048575`, which covers the complete window gate).  It
+reached statement construction but Dachshund rejected the resulting norm
+profile with `no valid split/merge of the witness was found`.  The four-limb
+profile therefore remains the smallest currently valid q88 witness encoding.
+
+The native proof profile shows that the largest serialized component is a
+Labrador subproof entry (`lab10`, about 65.7 KiB in the current profile),
+followed by the other Lab entries and Pack challenge vectors. Changing only
+the outer envelope or removing metadata therefore cannot provide a meaningful
+reduction; the next reduction must lower valid Pack parameter dimensions or
+replace the current CRT/lift layout with a compact quotient/carry statement.
+
 ## Conclusion and next implementation boundary
 
 The Lazer-Acc ideas are applicable, but the safe transplant is not a simple
