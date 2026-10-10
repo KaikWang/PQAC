@@ -10,7 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from q88_bridge_core import LANE_MODULI
+try:
+    from .q88_bridge_core import LANE_MODULI
+except ImportError:
+    from q88_bridge_core import LANE_MODULI
 
 from code.entities.zk_lazer.revac_acc96_wire import (
     GADGET_BASE, GADGET_DIGITS, HANDLE_BITS, MODULI, REFRESH_BITS,
