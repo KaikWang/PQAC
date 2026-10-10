@@ -607,7 +607,7 @@ def compile_linear_crt_bridge_fast(matrix, witness, target, *,
          for poly in lifted_matrix]
     w = [_decompose(poly, base, witness_digits, signed=True)
          for poly in witness]
-    q_digits = unsigned_digits(CRT_MODULUS, base, h_count)
+    q_digits = _digits(CRT_MODULUS, base, h_count, signed=False)
     t = _decompose(lifted_target, base, h_count, signed=False)
     q_layers = _decompose(quotient, base, quotient_digits, signed=True)
     layer_count = max(len(conv), h_count + quotient_digits - 1) + 1
