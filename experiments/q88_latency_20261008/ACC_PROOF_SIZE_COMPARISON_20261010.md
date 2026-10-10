@@ -215,3 +215,17 @@ The isolated worker dump also measured the complete serialized production
 q88 envelope directly: **198882 bytes = 194.220703 KiB**.  Pack Verify passed;
 prove was 4.673 s and verify was 2.466 s.  This byte count is the exact
 serialized baseline for the next full bridge proof.
+
+## 2026-10-10: grouped native Pack bridge KAT
+
+The ported grouped statement builder was executed on `autodl-pqac8` with a
+degree-256 exact bridge KAT.  It produced one native Pack proof, passed Pack
+Verify, and serialized successfully:
+
+```text
+serialized proof: 151066 bytes = 147.525 KiB
+```
+
+This validates the Lazer-Acc grouped statement construction and serializer
+path.  It is not the complete q88 accumulator relation; the real q88 bridge
+still needs the 4096-degree witness input and all auxiliary binding equations.
