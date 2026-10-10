@@ -185,6 +185,7 @@ void revac_ta_init(revac_ta_t *ta) {
   ta->acc_profile = REVAC_ACC_PROFILE_Q19;
   memset(&ta->acc96_ctx, 0, sizeof(ta->acc96_ctx));
   memset(ta->acc96_public_seed, 0, sizeof(ta->acc96_public_seed));
+  ta->acc96_window_id = 0;
   ta->acc96_state = NULL;
   ta->acc96_sampler = NULL;
   ta->acc96_sampler_opaque = NULL;
@@ -227,6 +228,7 @@ void revac_ta_setup_q19(revac_ta_t *ta) {
   ta->acc96_sampler_opaque = NULL;
   ta->acc96_witness_norm_sq_bound = 0.0L;
   memset(ta->acc96_public_seed, 0, sizeof(ta->acc96_public_seed));
+  ta->acc96_window_id = 0;
   for (size_t i = 0; i < ACC_GENPP_BML_CAPACITY; i++) {
     revac_bml_entry_clear(&ta->bml[i]);
     revac_q96_bml_entry_clear(&ta->q96_bml[i]);
@@ -309,6 +311,7 @@ int revac_ta_setup_q96(revac_ta_t *ta) {
   ta->acc96_sampler_opaque = secure_sampler;
   ta->acc96_witness_norm_sq_bound = ACC96_PUBLIC_WITNESS_NORM_SQ_BOUND;
   memcpy(ta->acc96_public_seed, public_seed, sizeof(ta->acc96_public_seed));
+  ta->acc96_window_id = 0;
   ta->acc_profile = REVAC_ACC_PROFILE_Q96;
   for (size_t i = 0; i < ACC_GENPP_BML_CAPACITY; i++) {
     revac_bml_entry_clear(&ta->bml[i]);
@@ -338,6 +341,11 @@ void revac_ta_public_state(revac_public_state_t *public_state,
   memset(public_state, 0, sizeof(*public_state));
   public_state->acc_profile = ta->acc_profile;
   public_state->ta_pk = &ta->ta_pk;
+  public_state->window_id = ta->acc_profile == REVAC_ACC_PROFILE_Q96
+                                ? ta->acc96_window_id
+                                : 0;
+  memcpy(public_state->parameter_digest, ta->context_pp_hash,
+         sizeof(public_state->parameter_digest));
   if (ta->acc_profile == REVAC_ACC_PROFILE_Q96) {
     if (ta->acc96_state == NULL) {
       return;

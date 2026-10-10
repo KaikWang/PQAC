@@ -15,7 +15,7 @@ from audit_accumulator_security import audit
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MANIFEST = ROOT / "params/revac-q88-window10000-candidate-v1.json"
+DEFAULT_MANIFEST = ROOT / "params/revac-q88-window50000-candidate-v2.json"
 CRT_HEADER = ROOT / "code/entities/common/core/include/acc80_crt.h"
 EVAL_HEADER = ROOT / "code/entities/common/core/include/acc80_eval.h"
 RELATION_HEADER = ROOT / "code/entities/common/core/include/acc96_relation.h"
@@ -132,9 +132,9 @@ def main() -> int:
         q_factors=factors,
     )
     for actual, key in (
-        (item.beta0_log2, "beta0_log2_at_10000"),
-        (item.beta1_log2, "beta1_log2_at_10000"),
-        (item.beta1_margin_log2, "log2_q_over_beta1_at_10000"),
+        (item.beta0_log2, "beta0_log2_at_50000"),
+        (item.beta1_log2, "beta1_log2_at_50000"),
+        (item.beta1_margin_log2, "log2_q_over_beta1_at_50000"),
     ):
         if not close(actual, float(window[key])):
             raise CheckError(f"{key} drifted from the arithmetic audit")
@@ -147,7 +147,8 @@ def main() -> int:
     coefficient_bytes = acc["ring_degree"] * acc["canonical_coefficient_bytes"]
     non_tag_polys = (
         2 + sampler["right_columns"] +
-        acc["handle_bits"] * gadget["digits"]
+        acc["handle_bits"] * gadget["digits"] +
+        layout["refresh_z_polynomials"]
     )
     expected_sizes = {
         "accumulator_kib": coefficient_bytes / 1024,
@@ -173,7 +174,7 @@ def main() -> int:
 
     expected_delta_sizes = {
         "delta4_single_worst_case_kib": delta4_kib(1),
-        "delta4_accumulated_10000_worst_case_kib": delta4_kib(
+        "delta4_accumulated_50000_worst_case_kib": delta4_kib(
             window["runtime_deletion_limit"]),
     }
     for key, actual in expected_delta_sizes.items():
@@ -189,7 +190,9 @@ def main() -> int:
         wire.TRUNC_RIGHT == sampler["right_columns"] and
         wire.NON_TAG_POLYS == non_tag_polys and
         wire.COEFF_BYTES == acc["canonical_coefficient_bytes"] and
-        wire.PUBLIC_MAGIC == b"RV88PP02" and wire.PROVER_MAGIC == b"RV88PV02"
+        wire.REFRESH_BITS == layout["refresh_bits"] and
+        wire.REFRESH_BLOCKS == layout["refresh_z_polynomials"] and
+        wire.PUBLIC_MAGIC == b"RV88PP03" and wire.PROVER_MAGIC == b"RV88PV04"
     )
     if not expected_wire:
         raise CheckError("Python LaBRADOR wire ABI drifted from candidate D")

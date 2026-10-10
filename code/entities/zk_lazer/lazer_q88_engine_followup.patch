@@ -1,0 +1,651 @@
+--- a/constraints.c
++++ b/constraints.c
+@@ -365,19 +365,21 @@
+ )
+ {
+   size_t rank, deg, len, nblocks;
++  int threads;
+ 
+   rank = a->len;
+   deg = next2power(rank);
+   len = r->len;
+   nblocks = (len + deg - 1) / deg;
++  threads = revac_labrador_rotation_threads(nblocks);
+ 
+   /* Each block reads the same challenge vector but disjoint slices of b and
+    * r.  All mutable scratch objects live inside the parallel region. */
+   #ifdef _OPENMP
+   #pragma omp parallel \
+-      num_threads(revac_labrador_team_threads(nblocks)) \
++      num_threads(threads) \
+       if(revac_labrador_rotation_parallel_enabled() && \
+-         revac_labrador_parallel_work(nblocks, 4))
++         threads > 1 && nblocks >= 4 && !omp_in_parallel())
+   #endif
+   {
+     polxvec r_sv, a_sv, b_sv, b0_sv, tutl, tu, tl, tu_sv, tl_sv, tmp, tmp_sv;
+--- a/dachshund.c
++++ b/dachshund.c
+@@ -38,6 +38,35 @@
+ #endif
+ }
+ 
++static int dch_quadratic_linear_batch_enabled(void){
++#ifdef _OPENMP
++  const char *value = getenv("REVAC_LABRADOR_DCH_QUADRATIC_LINEAR_BATCH");
++  return value != NULL && value[0] != '\0' && value[0] != '0';
++#else
++  return 0;
++#endif
++}
++
++/* A generated constraint normally references every witness vector once, so
++ * its linear parts occupy disjoint slices of the flattened witness.  Verify
++ * that invariant before scheduling parts concurrently; the generic API still
++ * permits repeated/overlapping parts and must retain serial accumulation for
++ * those statements. */
++static int dch_linear_parts_disjoint(const sparsecnst c){
++  size_t i, j;
++
++  for(i=0;i<c->lin->nparts;i++){
++    const size_t begin_i = c->lin->off[i];
++    const size_t end_i = begin_i + c->lin->phi[i]->len;
++    for(j=i+1;j<c->lin->nparts;j++){
++      const size_t begin_j = c->lin->off[j];
++      const size_t end_j = begin_j + c->lin->phi[j]->len;
++      if(begin_i < end_j && begin_j < end_i) return 0;
++    }
++  }
++  return 1;
++}
++
+ static void dch_debug_witness_prefix(const char *label, const witness derived,
+                                      const witness original){
+   size_t i, j, nn = 0;
+@@ -1476,7 +1505,7 @@
+ )
+ {
+   size_t i, j, off_chalx, rank, idx_left, idx_right, nparts_left;
+-  polxvec chalx_sv, outphi;
++  polxvec chalx_sv;
+   sparsecnst *in;
+   int64_t s, base = ONE << pp->base_quad_left;
+ 
+@@ -1518,14 +1547,35 @@
+ 
+     polxvec_sprod_add(c->b, chalx_sv, (*in)->b);
+ 
+-    for(j=0;j<(*in)->lin->nparts;j++){
+-      polxvec_init_subvec2(outphi, c->lin->phi[0], (*in)->lin->off[j], 1,
+-                           (*in)->lin->phi[j]->len);
+-      if(rank == 1){
+-        polxvec_mul_add(outphi, chalx_sv, (*in)->lin->phi[j]);
++    if(dch_quadratic_linear_batch_enabled() &&
++       dch_linear_parts_disjoint(*in)){
++      const int threads = revac_labrador_team_threads((*in)->lin->nparts);
++      #ifdef _OPENMP
++      #pragma omp parallel for num_threads(threads) \
++          if(threads > 1 && (*in)->lin->nparts >= 2 && !omp_in_parallel()) \
++          schedule(dynamic, 1)
++      #endif
++      for(j=0;j<(*in)->lin->nparts;j++){
++        polxvec outphi;
++        polxvec_init_subvec2(outphi, c->lin->phi[0], (*in)->lin->off[j], 1,
++                             (*in)->lin->phi[j]->len);
++        if(rank == 1)
++          polxvec_mul_add(outphi, chalx_sv, (*in)->lin->phi[j]);
++        else
++          polxvec_rotation_aggregate_add(
++              outphi, chalx_sv, (*in)->lin->phi[j]);
+       }
+-      else{
+-        polxvec_rotation_aggregate_add(outphi, chalx_sv, (*in)->lin->phi[j]);
++    }
++    else{
++      for(j=0;j<(*in)->lin->nparts;j++){
++        polxvec outphi;
++        polxvec_init_subvec2(outphi, c->lin->phi[0], (*in)->lin->off[j], 1,
++                             (*in)->lin->phi[j]->len);
++        if(rank == 1)
++          polxvec_mul_add(outphi, chalx_sv, (*in)->lin->phi[j]);
++        else
++          polxvec_rotation_aggregate_add(
++              outphi, chalx_sv, (*in)->lin->phi[j]);
+       }
+     }
+ 
+--- a/labrador_core.c
++++ b/labrador_core.c
+@@ -436,9 +436,24 @@
+ )
+ {
+   size_t i, j, k, nn, pib, wtb, bestbits, rem, ncandidates, *candidates;
++  size_t target_nmax = 0;
+   size_t decompose, maxsplit;
+   lab_params *pp, *bestpp, *tmp;
+   int ret;
++  const char *diag_value = getenv("REVAC_LABRADOR_PARAM_CANDIDATES");
++  const int diagnose_candidates = diag_value != NULL &&
++                                  diag_value[0] != '\0' &&
++                                  diag_value[0] != '0';
++  {
++    const char *target_value = getenv("REVAC_LABRADOR_FIRST_TARGET_NMAX");
++    if(target_value != NULL && target_value[0] != '\0'){
++      char *end = NULL;
++      unsigned long long parsed = strtoull(target_value, &end, 10);
++      if(end != target_value && *end == '\0' && parsed > 0 &&
++         parsed <= SIZE_MAX)
++        target_nmax = (size_t)parsed;
++    }
++  }
+ 
+   assert(!compressed || !tail);
+   assert(!zk || compressed);
+@@ -510,7 +525,25 @@
+     ret = lab_params_gen_raw(*pp, &pib, &wtb, st, decompose,
+                               global_norm_check, slack_norm_check);
+ 
+-    if(!ret && pib + wtb < bestbits){
++    if(!ret && diagnose_candidates && nn >= 50000){
++      fprintf(stderr,
++              "[Labrador 参数候选] input_r=%zu nn=%zu candidate=%zu "
++              "output_r=%zu nmax=%zu proof_bits=%zu witness_bits=%zu "
++              "total_bits=%zu\n",
++              st->r, nn, candidates[i], (*pp)->r, (*pp)->nmax,
++              pib, wtb, pib + wtb);
++    }
++
++    /* The upstream selector minimizes only serialized proof plus output
++     * witness bits.  For a very wide first q88 fold, allow a deployment to
++     * cap nmax and then retain the smallest-size candidate under that cap.
++     * This changes only public Pack parameters, never the relation or its
++     * security checks.  Restrict it to high-vector-count compressed rounds so
++     * later recursive rounds keep their independently optimal split. */
++    if(!ret &&
++       (target_nmax == 0 || !compressed || st->r < 64 ||
++        (*pp)->nmax <= target_nmax) &&
++       pib + wtb < bestbits){
+       bestbits = pib + wtb;
+       *owtbits = wtb;
+       *pibits = pib;
+--- a/labrados_python.c
++++ b/labrados_python.c
+@@ -706,7 +706,7 @@
+   return 0;
+ }
+ 
+-int py_append_quadratic(
++static int py_append_quadratic_monomials_impl(
+   statement st,
+   size_t nlin,
+   size_t nprod,
+@@ -716,6 +716,7 @@
+   const size_t len_phi[],
+   size_t deg,
+   int64_t *a,
++  const uint32_t *monomial_exponents,
+   int64_t *phi,
+   int64_t *b
+ )
+@@ -738,6 +739,11 @@
+   for(i=0;i<nprod;i++){
+     j = idx_prod1[i];
+     k = idx_prod2[i];
++    if(monomial_exponents != NULL && monomial_exponents[i] >= N){
++      fprintf(stderr, "ERROR in py_append_quadratic(): "
++                      "Quadratic monomial exponent is out of range\n");
++      return 5;
++    }
+     if(j >= st->r){
+       fprintf(stderr, "ERROR in py_append_quadratic(): "
+                       "Witness vector %zu does not exist\n", j);
+@@ -775,7 +781,9 @@
+         (*cnst)->quad->rows[i] = k;
+         (*cnst)->quad->cols[i] = j;
+       }
+-      polx_monomial((*cnst)->quad->coeffs[i], 0, a[i]);
++      polx_monomial((*cnst)->quad->coeffs[i],
++                    monomial_exponents == NULL ? 0 : monomial_exponents[i],
++                    a[i]);
+     }
+     return 0;
+   }
+@@ -797,9 +805,12 @@
+       (*cnst)->quad->cols[i] = idx_prod1[i];
+     }
+     
+-    polx_monomial((*cnst)->quad->coeffs[i], 0, a[i]);
++    polx_monomial((*cnst)->quad->coeffs[i],
++                  monomial_exponents == NULL ? 0 : monomial_exponents[i],
++                  a[i]);
+ 
+-    quadcoeffs[0] = a[i];
++    memset(quadcoeffs, 0, sizeof(quadcoeffs));
++    quadcoeffs[monomial_exponents == NULL ? 0 : monomial_exponents[i]] = a[i];
+     memset(&t, 0, sizeof(t));
+     polzvec_fromint64vec(&t, 1, 1, quadcoeffs);
+     polzvec_bitpack((*cnst)->transcript_quad + i * POLZBYTES, &t, 1);
+@@ -815,6 +826,30 @@
+   return 0;
+ }
+ 
++int py_append_quadratic(
++  statement st, size_t nlin, size_t nprod, const size_t idx_lin[],
++  const size_t idx_prod1[], const size_t idx_prod2[],
++  const size_t len_phi[], size_t deg, int64_t *a, int64_t *phi, int64_t *b
++)
++{
++  return py_append_quadratic_monomials_impl(
++      st, nlin, nprod, idx_lin, idx_prod1, idx_prod2, len_phi, deg, a,
++      NULL, phi, b);
++}
++
++int py_append_quadratic_monomials(
++  statement st, size_t nlin, size_t nprod, const size_t idx_lin[],
++  const size_t idx_prod1[], const size_t idx_prod2[],
++  const size_t len_phi[], size_t deg, int64_t *a,
++  const uint32_t *monomial_exponents, int64_t *phi, int64_t *b
++)
++{
++  if(nprod != 0 && monomial_exponents == NULL) return 6;
++  return py_append_quadratic_monomials_impl(
++      st, nlin, nprod, idx_lin, idx_prod1, idx_prod2, len_phi, deg, a,
++      monomial_exponents, phi, b);
++}
++
+ int py_append_deg0_constraint(
+   statement st,
+   size_t idx,
+@@ -1208,6 +1243,143 @@
+     }
+   }
+   free(woff);
++  return 0;
++}
++
++/* q88 stores every A-hat radix chunk either as a blocks-wide vector for one
++ * CRT-lane/phase pair, or as a blocks*phases-wide vector containing complete
++ * degree-(phases*N) polynomials.  Append the same coefficient-wise
++ * equalities as the generic bridge above, but address the selected base-ring
++ * polynomial directly instead of materializing a one-hot coefficient
++ * vector.  The packed form lets the full-ring compiler keep the hidden
++ * Remark-4.3 selector bits in the base ring (bit_count backend polynomials)
++ * rather than repeating every bit in all extension phases. */
++int py_append_refresh_phase_constraints(
++  statement st,
++  size_t r_idx,
++  const size_t *chunk_idx,
++  const size_t *lift_idx,
++  const int32_t *bank,
++  size_t bit_count,
++  size_t blocks,
++  size_t lanes,
++  size_t phases,
++  size_t degree,
++  const uint32_t *moduli,
++  int64_t base,
++  size_t chunks
++)
++{
++  size_t *woff;
++  size_t lane, phase, block, bit, chunk, coeff, i;
++  const size_t bank_matrix_stride = lanes * phases * blocks * degree;
++  const double width_unif = ldexp(1, 2*LOGQ);
++  int64_t coeff64[N];
++  uint8_t hashbuf[POLZBYTES];
++  polz integer;
++
++  if(st == NULL || chunk_idx == NULL || lift_idx == NULL || bank == NULL ||
++     moduli == NULL || r_idx >= st->r || st->n[r_idx] != bit_count ||
++     degree != N || bit_count == 0 || blocks == 0 || lanes == 0 ||
++     phases == 0 || chunks == 0 || base <= 1) return 1;
++  for(lane=0;lane<lanes;lane++){
++    if(moduli[lane] <= 1) return 2;
++    for(phase=0;phase<phases;phase++){
++      const size_t pair = lane * phases + phase;
++      if(lift_idx[pair] >= st->r ||
++         (st->n[lift_idx[pair]] != blocks &&
++          st->n[lift_idx[pair]] != blocks * phases))
++        return 3;
++      for(chunk=0;chunk<chunks;chunk++){
++        const size_t idx = chunk_idx[pair * chunks + chunk];
++        if(idx >= st->r ||
++           (st->n[idx] != blocks && st->n[idx] != blocks * phases))
++          return 4;
++      }
++    }
++  }
++
++  woff = _malloc(st->r * sizeof(size_t));
++  woff[0] = 0;
++  for(i=1;i<st->r;i++) woff[i] = woff[i-1] + st->n[i-1];
++
++  for(lane=0;lane<lanes;lane++){
++    for(phase=0;phase<phases;phase++){
++      const size_t pair = lane * phases + phase;
++      for(block=0;block<blocks;block++){
++        sparsecnst *slot = &st->rqcnst->sparse[st->rqcnst->nsparse++];
++        shake128incctx hashctx;
++        const size_t bank_offset =
++          (((lane * phases + phase) * blocks + block) * degree);
++        int64_t scale = 1;
++
++        st->rqcnst->sparse_nchal += 1;
++        sparsecnst_init(*slot, 1);
++        linfunc_init((*slot)->lin, 1, chunks + 2, chunks + 2);
++        shake128_inc_init(&hashctx);
++        shake128_inc_absorb(&hashctx, st->h, sizeof(st->h));
++
++        for(coeff=0;coeff<degree;coeff++)
++          coeff64[coeff] = -(int64_t)bank[bank_offset + coeff];
++        polzvec_fromint64vec(&integer, 1, 1, coeff64);
++        polzvec_topolxvec((*slot)->b, &integer, 0, 1, 1);
++        polxvec_setwidths1((*slot)->b, 0, 1, 1, width_unif);
++        polzvec_bitpack(hashbuf, &integer, 1);
++        shake128_inc_absorb(&hashctx, hashbuf, sizeof(hashbuf));
++
++        (*slot)->lin->off[0] = woff[r_idx];
++        polxvec_init((*slot)->lin->phi[0], bit_count, 1);
++        for(bit=0;bit<bit_count;bit++){
++          for(coeff=0;coeff<degree;coeff++)
++            coeff64[coeff] = bank[(bit + 1) * bank_matrix_stride +
++                                  bank_offset + coeff];
++          polzvec_fromint64vec(&integer, 1, 1, coeff64);
++          polzvec_topolxvec((*slot)->lin->phi[0], &integer, bit, 1, 1);
++          polzvec_bitpack(hashbuf, &integer, 1);
++          shake128_inc_absorb(&hashctx, hashbuf, sizeof(hashbuf));
++        }
++        polxvec_setwidths1((*slot)->lin->phi[0], 0, 1, bit_count,
++                          width_unif);
++
++        memset(coeff64, 0, sizeof(coeff64));
++        for(chunk=0;chunk<chunks;chunk++){
++          const size_t idx = chunk_idx[pair * chunks + chunk];
++          const size_t selected = st->n[idx] == blocks
++                                  ? block : block * phases + phase;
++          (*slot)->lin->off[chunk + 1] = woff[idx] + selected;
++          polxvec_init((*slot)->lin->phi[chunk + 1], 1, 1);
++          coeff64[0] = -scale;
++          polzvec_fromint64vec(&integer, 1, 1, coeff64);
++          polzvec_topolxvec((*slot)->lin->phi[chunk + 1], &integer,
++                           0, 1, 1);
++          polxvec_setwidths1((*slot)->lin->phi[chunk + 1], 0, 1, 1,
++                            width_unif);
++          polzvec_bitpack(hashbuf, &integer, 1);
++          shake128_inc_absorb(&hashctx, hashbuf, sizeof(hashbuf));
++          coeff64[0] = 0;
++          scale *= base;
++        }
++        {
++          const size_t idx = lift_idx[pair];
++          const size_t selected = st->n[idx] == blocks
++                                  ? block : block * phases + phase;
++          (*slot)->lin->off[chunks + 1] = woff[idx] + selected;
++        }
++        polxvec_init((*slot)->lin->phi[chunks + 1], 1, 1);
++        coeff64[0] = -(int64_t)moduli[lane];
++        polzvec_fromint64vec(&integer, 1, 1, coeff64);
++        polzvec_topolxvec((*slot)->lin->phi[chunks + 1], &integer,
++                         0, 1, 1);
++        polxvec_setwidths1((*slot)->lin->phi[chunks + 1], 0, 1, 1,
++                          width_unif);
++        polzvec_bitpack(hashbuf, &integer, 1);
++        shake128_inc_absorb(&hashctx, hashbuf, sizeof(hashbuf));
++        shake128_inc_finalize(&hashctx);
++        shake128_inc_squeeze(st->h, sizeof(st->h), &hashctx);
++      }
++    }
++  }
++  free(woff);
+   return 0;
+ }
+ 
+--- a/labrados_python.h
++++ b/labrados_python.h
+@@ -57,6 +57,14 @@
+                         const size_t idx_prod2[], const size_t len_phi[],
+                         size_t deg, int64_t *a, int64_t *phi, int64_t *b);
+ 
++#define py_append_quadratic_monomials NAMESPACE(py_append_quadratic_monomials)
++__attribute__((visibility("default")))
++int py_append_quadratic_monomials(
++    statement st, size_t nlin, size_t nprod, const size_t idx_lin[],
++    const size_t idx_prod1[], const size_t idx_prod2[],
++    const size_t len_phi[], size_t deg, int64_t *a,
++    const uint32_t *monomial_exponents, int64_t *phi, int64_t *b);
++
+ #define py_append_deg0_constraint NAMESPACE(py_append_deg0_constraint)
+ __attribute__((visibility("default")))
+ int py_append_deg0_constraint(statement st, size_t idx, size_t deg);
+@@ -102,6 +110,15 @@
+                                   size_t degree, int64_t q, int64_t base,
+                                   size_t chunks);
+ 
++#define py_append_refresh_phase_constraints \
++  NAMESPACE(py_append_refresh_phase_constraints)
++__attribute__((visibility("default")))
++int py_append_refresh_phase_constraints(
++    statement st, size_t r_idx, const size_t *chunk_idx,
++    const size_t *lift_idx, const int32_t *bank, size_t bit_count,
++    size_t blocks, size_t lanes, size_t phases, size_t degree,
++    const uint32_t *moduli, int64_t base, size_t chunks);
++
+ #define py_decompose_set_witness NAMESPACE(py_decompose_set_witness)
+ __attribute__((visibility("default")))
+ int py_decompose_set_witness(witness wt, const size_t *indices,
+--- a/polx.c
++++ b/polx.c
+@@ -64,6 +64,11 @@
+ #endif
+ }
+ 
++static int revac_polxvec_linear_threads(size_t work) {
++  return revac_polxvec_kernel_threads(
++      "REVAC_LABRADOR_LINEAR_THREADS", work);
++}
++
+ static int revac_exact_refresh_threads(size_t work) {
+ #ifdef _OPENMP
+   const char *value = getenv("REVAC_LABRADOR_EXACT_REFRESH_THREADS");
+@@ -568,7 +573,9 @@
+ }
+ 
+ void polxvec_add(polxvec r, const polxvec a, const polxvec b) {
+-  size_t i,j,k;
++  size_t i;
++  const size_t nblocks = (r->len + 31) / 32;
++  const int threads = revac_polxvec_linear_threads(nblocks);
+ 
+   assert(r->len == a->len && a->len == b->len);
+   assert(!r->widths || (a->widths && b->widths));
+@@ -578,11 +585,20 @@
+       assert(r->widths[i*r->stride] <= MAXWIDTH);
+     }
+   }
+-  for(j=0;(k=MIN(32,r->len-j));j+=k) {
+-    for(i=0;i<K;i++) {
+-      polyvec_add(&r->proj[i][j*r->stride],&a->proj[i][j*a->stride],&b->proj[i][j*b->stride],
++  #ifdef _OPENMP
++  #pragma omp parallel for num_threads(threads) \
++      if(threads > 1 && nblocks >= 4 && !omp_in_parallel()) schedule(static)
++  #endif
++  for(size_t block=0;block<nblocks;block++) {
++    const size_t j = block * 32;
++    const size_t k = MIN(32,r->len-j);
++    for(size_t prime_idx=0;prime_idx<K;prime_idx++) {
++      polyvec_add(&r->proj[prime_idx][j*r->stride],
++                  &a->proj[prime_idx][j*a->stride],
++                  &b->proj[prime_idx][j*b->stride],
+                   r->stride,a->stride,b->stride,k);
+-      polyvec_reduce(&r->proj[i][j*r->stride],r->stride,k,primes[i]);
++      polyvec_reduce(&r->proj[prime_idx][j*r->stride],r->stride,k,
++                     primes[prime_idx]);
+     }
+   }
+ }
+@@ -598,7 +614,9 @@
+ }
+ 
+ void polxvec_sub(polxvec r, const polxvec a, const polxvec b) {
+-  size_t i,j,k;
++  size_t i;
++  const size_t nblocks = (r->len + 31) / 32;
++  const int threads = revac_polxvec_linear_threads(nblocks);
+ 
+   assert(r->len == a->len && a->len == b->len);
+   assert(!r->widths || (a->widths && b->widths));
+@@ -608,11 +626,20 @@
+       assert(r->widths[i*r->stride] <= MAXWIDTH);
+     }
+   }
+-  for(j=0;(k=MIN(32,r->len-j));j+=k) {
+-    for(i=0;i<K;i++) {
+-      polyvec_sub(&r->proj[i][j*r->stride],&a->proj[i][j*a->stride],&b->proj[i][j*b->stride],
++  #ifdef _OPENMP
++  #pragma omp parallel for num_threads(threads) \
++      if(threads > 1 && nblocks >= 4 && !omp_in_parallel()) schedule(static)
++  #endif
++  for(size_t block=0;block<nblocks;block++) {
++    const size_t j = block * 32;
++    const size_t k = MIN(32,r->len-j);
++    for(size_t prime_idx=0;prime_idx<K;prime_idx++) {
++      polyvec_sub(&r->proj[prime_idx][j*r->stride],
++                  &a->proj[prime_idx][j*a->stride],
++                  &b->proj[prime_idx][j*b->stride],
+                   r->stride,a->stride,b->stride,k);
+-      polyvec_reduce(&r->proj[i][j*r->stride],r->stride,k,primes[i]);
++      polyvec_reduce(&r->proj[prime_idx][j*r->stride],r->stride,k,
++                     primes[prime_idx]);
+     }
+   }
+ }
+@@ -1256,6 +1283,9 @@
+ 
+ void polxvec_scale(polxvec r, const polxvec a, int64_t s) {
+   size_t i;
++  const size_t nblocks = (r->len + 31) / 32;
++  const int threads = revac_polxvec_linear_threads(nblocks);
++  int16_t sp[K];
+ 
+   s = cmodq(s);
+   assert(r->len == a->len);
+@@ -1268,7 +1298,19 @@
+   }
+   s <<= 16;
+   for(i=0;i<K;i++)
+-    polyvec_scale(r->proj[i],a->proj[i],r->stride,a->stride,r->len,modp(s,primes[i]),primes[i]);
++    sp[i] = modp(s,primes[i]);
++  #ifdef _OPENMP
++  #pragma omp parallel for num_threads(threads) \
++      if(threads > 1 && nblocks >= 4 && !omp_in_parallel()) schedule(static)
++  #endif
++  for(size_t block=0;block<nblocks;block++) {
++    const size_t j = block * 32;
++    const size_t k = MIN(32,r->len-j);
++    for(size_t prime_idx=0;prime_idx<K;prime_idx++)
++      polyvec_scale(&r->proj[prime_idx][j*r->stride],
++                    &a->proj[prime_idx][j*a->stride],
++                    r->stride,a->stride,k,sp[prime_idx],primes[prime_idx]);
++  }
+ }
+ 
+ void polxvec_scale_frompolyvec(polxvec r, const poly *a, ssize_t stride, size_t len, double width, int64_t s) {
+@@ -1301,7 +1343,9 @@
+ }
+ 
+ void polxvec_scale_add(polxvec r, const polxvec a, int64_t s) {
+-  size_t i,j,k;
++  size_t i;
++  const size_t nblocks = (r->len + 31) / 32;
++  const int threads = revac_polxvec_linear_threads(nblocks);
+   int16_t sp[K];
+ 
+   assert(r->len == a->len);
+@@ -1316,10 +1360,19 @@
+   s <<= 16;
+   for(i=0;i<K;i++)
+     sp[i] = modp(s,primes[i]);
+-  for(j=0;(k=MIN(32,r->len-j));j+=k) {
+-    for(i=0;i<K;i++) {
+-      polyvec_scale_add(&r->proj[i][j*r->stride],&a->proj[i][j*a->stride],r->stride,a->stride,k,sp[i],primes[i]);
+-      polyvec_reduce(&r->proj[i][j*r->stride],r->stride,k,primes[i]);
++  #ifdef _OPENMP
++  #pragma omp parallel for num_threads(threads) \
++      if(threads > 1 && nblocks >= 4 && !omp_in_parallel()) schedule(static)
++  #endif
++  for(size_t block=0;block<nblocks;block++) {
++    const size_t j = block * 32;
++    const size_t k = MIN(32,r->len-j);
++    for(size_t prime_idx=0;prime_idx<K;prime_idx++) {
++      polyvec_scale_add(&r->proj[prime_idx][j*r->stride],
++                        &a->proj[prime_idx][j*a->stride],
++                        r->stride,a->stride,k,sp[prime_idx],primes[prime_idx]);
++      polyvec_reduce(&r->proj[prime_idx][j*r->stride],r->stride,k,
++                     primes[prime_idx]);
+     }
+   }
+ }
+--- a/polz.c
++++ b/polz.c
+@@ -1270,22 +1270,29 @@
+   }
+ }
+ 
++/* The rejection checks only need centered signed 64-bit coefficients.  The
++ * old path copied every coefficient into a temporary zz object before
++ * reconstructing the same value.  Keep the limb order and sign convention
++ * identical to int64_fromzz(), but read the limbs in place. */
++static inline int64_t polz_coeff_i64_fast(const polz a, size_t k) {
++  int64_t value = a->limbs[0]->c[k];
++  for (size_t limb = 1; limb < L; limb++)
++    value += (int64_t)a->limbs[limb]->c[k] << (14 * limb);
++  return value;
++}
++
+ int64_t polzvec_sprodz(const polz *a, const polz *b, size_t len) {
+   int64_t sum = 0;
+-  const int threads = revac_labrador_team_threads(len);
++  const int threads = revac_labrador_lnp_norm_threads(len);
+ 
+   #ifdef _OPENMP
+-  #pragma omp parallel for num_threads(threads) if(revac_labrador_parallel_work(len, 16)) schedule(static) reduction(+:sum)
++  #pragma omp parallel for num_threads(threads) if(threads > 1 && len >= 16 && !omp_in_parallel()) schedule(static) reduction(+:sum)
+   #endif
+   for (size_t i = 0; i < len; i++) {
+-    zz coeffa, coeffb;
+     int64_t ia, ib;
+     for(size_t j = 0; j < N; j++) {
+-      polz_getcoeff(coeffa, a[i], j);
+-      polz_getcoeff(coeffb, b[i], j);
+-      
+-      ia = int64_fromzz(coeffa);
+-      ib = int64_fromzz(coeffb);
++      ia = polz_coeff_i64_fast(a[i], j);
++      ib = polz_coeff_i64_fast(b[i], j);
+ 
+       sum += ia * ib;
+     }
+@@ -1302,19 +1309,16 @@
+                                 size_t len, int64_t *zv, int64_t *vv) {
+   int64_t mask_shift = 0;
+   int64_t shift_sq = 0;
+-  const int threads = revac_labrador_team_threads(len);
++  const int threads = revac_labrador_lnp_norm_threads(len);
+ 
+   #ifdef _OPENMP
+-  #pragma omp parallel for num_threads(threads) if(revac_labrador_parallel_work(len, 16)) schedule(static) reduction(+:mask_shift,shift_sq)
++  #pragma omp parallel for num_threads(threads) if(threads > 1 && len >= 16 && !omp_in_parallel()) schedule(static) reduction(+:mask_shift,shift_sq)
+   #endif
+   for (size_t i = 0; i < len; i++) {
+-    zz coeff_mask, coeff_shift;
+     int64_t imask, ishift;
+     for (size_t j = 0; j < N; j++) {
+-      polz_getcoeff(coeff_mask, mask[i], j);
+-      polz_getcoeff(coeff_shift, shift[i], j);
+-      imask = int64_fromzz(coeff_mask);
+-      ishift = int64_fromzz(coeff_shift);
++      imask = polz_coeff_i64_fast(mask[i], j);
++      ishift = polz_coeff_i64_fast(shift[i], j);
+       mask_shift += imask * ishift;
+       shift_sq += ishift * ishift;
+     }

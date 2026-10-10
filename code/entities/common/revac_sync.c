@@ -338,6 +338,10 @@ static int q96_pack_witness(uint8_t *out,
   for (size_t bit = 0; bit < ACC96_HANDLE_BITS; bit++)
     for (size_t digit = 0; digit < ACC96_GADGET_DIGITS; digit++)
       PACK_Q96_POLY(&witness->right.right[bit][digit]);
+  memcpy(out + offset, witness->refresh_r, ACC96_REFRESH_BYTES);
+  offset += ACC96_REFRESH_BYTES;
+  for (size_t block = 0; block < ACC96_REFRESH_BLOCKS; block++)
+    PACK_Q96_POLY(&witness->refresh_z[block]);
 #undef PACK_Q96_POLY
   return offset == REVAC_Q96_SYNC_WITNESS_BYTES;
 }
@@ -359,6 +363,10 @@ static int q96_unpack_witness(acc96_relation_witness_t *witness,
   for (size_t bit = 0; bit < ACC96_HANDLE_BITS; bit++)
     for (size_t digit = 0; digit < ACC96_GADGET_DIGITS; digit++)
       UNPACK_Q96_POLY(&witness->right.right[bit][digit]);
+  memcpy(witness->refresh_r, encoded + offset, ACC96_REFRESH_BYTES);
+  offset += ACC96_REFRESH_BYTES;
+  for (size_t block = 0; block < ACC96_REFRESH_BLOCKS; block++)
+    UNPACK_Q96_POLY(&witness->refresh_z[block]);
 #undef UNPACK_Q96_POLY
   return offset == REVAC_Q96_SYNC_WITNESS_BYTES;
 }

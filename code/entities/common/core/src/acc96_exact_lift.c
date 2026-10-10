@@ -115,9 +115,16 @@ static int memver_exact_lift_lane(
     const acc96_ctx_t *ctx) {
   fmpz_poly_t expression, lhs, rhs, product;
   fmpz_t low, high, term, difference, quotient;
+  acc96_poly_t *refresh_matrix = malloc(sizeof(*refresh_matrix));
+  acc96_poly_t *refresh_expanded = malloc(sizeof(*refresh_expanded));
   acc96_u128 scale;
   unsigned max_bits = 0;
-  int ok = 1;
+  int ok = refresh_matrix != NULL && refresh_expanded != NULL;
+  if (!ok) {
+    free(refresh_expanded);
+    free(refresh_matrix);
+    return 0;
+  }
   fmpz_poly_init(expression);
   fmpz_poly_init(lhs);
   fmpz_poly_init(rhs);
@@ -175,6 +182,20 @@ static int memver_exact_lift_lane(
     }
   }
 
+  for (size_t block = 0; block < ACC96_REFRESH_BLOCKS; block++) {
+    acc96_relation_refresh_matrix_poly(refresh_matrix, pp, 0, block);
+    for (size_t bit = 0; bit < ACC96_REFRESH_BITS; bit++) {
+      if (((witness->refresh_r[bit >> 3] >> (bit & 7U)) & 1U) == 0U)
+        continue;
+      acc96_relation_refresh_matrix_poly(refresh_expanded, pp, bit + 1U,
+                                         block);
+      acc96_poly_add(refresh_matrix, refresh_matrix, refresh_expanded);
+    }
+    poly_from_lane(lhs, refresh_matrix, lane);
+    poly_from_common(rhs, &witness->refresh_z[block], ctx);
+    negacyclic_muladd(expression, lhs, rhs, product, low, high, term, 0);
+  }
+
   for (size_t k = 0; k < ACC96_N && ok; k++) {
     fmpz_poly_get_coeff_fmpz(term, expression, (slong)k);
     fmpz_set_si(difference,
@@ -205,6 +226,8 @@ static int memver_exact_lift_lane(
   fmpz_poly_clear(rhs);
   fmpz_poly_clear(lhs);
   fmpz_poly_clear(expression);
+  free(refresh_expanded);
+  free(refresh_matrix);
   return ok;
 }
 

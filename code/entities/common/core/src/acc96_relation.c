@@ -19,6 +19,18 @@ static void absorb_u32_le(keccak_state *state, uint32_t value) {
   shake256_absorb(state, encoded, sizeof(encoded));
 }
 
+static void derive_refresh_seed(uint8_t out[ACC96_SEED_BYTES],
+                                const uint8_t seed[ACC96_SEED_BYTES]) {
+  static const uint8_t domain[] = "REVAC-Q88-REMARK-4.3-v1";
+  keccak_state state;
+
+  shake256_init(&state);
+  shake256_absorb(&state, domain, sizeof(domain) - 1U);
+  shake256_absorb(&state, seed, ACC96_SEED_BYTES);
+  shake256_finalize(&state);
+  shake256_squeeze(out, ACC96_SEED_BYTES, &state);
+}
+
 static void expand_poly(acc96_poly_t *out,
                         const uint8_t seed[ACC96_SEED_BYTES],
                         uint32_t domain, uint32_t first, uint32_t second) {
@@ -75,6 +87,17 @@ static void sample_ternary_poly(acc96_poly_t *out,
   }
 }
 
+void acc96_relation_refresh_sample(
+    acc96_relation_witness_t *witness,
+    const uint8_t seed[ACC96_SEED_BYTES]) {
+  if (witness == NULL || seed == NULL) return;
+  shake256(witness->refresh_r, sizeof(witness->refresh_r), seed,
+           ACC96_SEED_BYTES);
+  for (size_t block = 0; block < ACC96_REFRESH_BLOCKS; block++)
+    sample_ternary_poly(&witness->refresh_z[block], seed,
+                        UINT32_C(0x5a383852), (uint32_t)block, 0);
+}
+
 int acc96_relation_pp_expand(acc96_relation_pp_t *pp,
                              const uint8_t seed[ACC96_SEED_BYTES],
                              const acc96_ctx_t *ctx) {
@@ -90,6 +113,7 @@ int acc96_relation_pp_expand(acc96_relation_pp_t *pp,
     }
   }
   expand_poly(&pp->ua, seed, 0x55393631U, 0, 0);
+  derive_refresh_seed(pp->refresh_seed, seed);
   return 1;
 }
 
@@ -119,6 +143,44 @@ static void add_product(acc96_poly_t *acc, const acc96_poly_t *lhs,
   acc96_poly_set(acc, next);
   free(next);
   free(product);
+}
+
+void acc96_relation_refresh_matrix_poly(
+    acc96_poly_t *out, const acc96_relation_pp_t *pp,
+    size_t matrix_index, size_t block) {
+  if (out == NULL || pp == NULL || matrix_index > ACC96_REFRESH_BITS ||
+      block >= ACC96_REFRESH_BLOCKS) {
+    if (out != NULL) acc96_poly_zero(out);
+    return;
+  }
+  expand_poly(out, pp->refresh_seed, UINT32_C(0x52383841),
+              (uint32_t)matrix_index, (uint32_t)block);
+}
+
+void acc96_relation_refresh_apply(
+    acc96_poly_t *out, const acc96_relation_pp_t *pp,
+    const acc96_relation_witness_t *witness, const acc96_ctx_t *ctx) {
+  acc96_poly_t *composed = malloc(sizeof(*composed));
+  acc96_poly_t *expanded = malloc(sizeof(*expanded));
+  if (out == NULL || pp == NULL || witness == NULL || ctx == NULL ||
+      composed == NULL || expanded == NULL) {
+    free(expanded);
+    free(composed);
+    return;
+  }
+  acc96_poly_zero(out);
+  for (size_t block = 0; block < ACC96_REFRESH_BLOCKS; block++) {
+    acc96_relation_refresh_matrix_poly(composed, pp, 0, block);
+    for (size_t bit = 0; bit < ACC96_REFRESH_BITS; bit++) {
+      if (((witness->refresh_r[bit >> 3] >> (bit & 7U)) & 1U) == 0U)
+        continue;
+      acc96_relation_refresh_matrix_poly(expanded, pp, bit + 1U, block);
+      acc96_poly_add(composed, composed, expanded);
+    }
+    add_product(out, composed, &witness->refresh_z[block], 0, ctx);
+  }
+  free(expanded);
+  free(composed);
 }
 
 static void add_member_right(acc96_poly_t *out,
@@ -153,6 +215,8 @@ void acc96_relation_evaluate(acc96_poly_t *out,
     add_product(out, matrix, &witness->v2[i], 1, ctx);
   }
   add_member_right(out, pp, handle, &witness->right, ctx);
+  acc96_relation_refresh_apply(tag_term, pp, witness, ctx);
+  acc96_poly_add(out, out, tag_term);
   free(tag_term);
   free(scalar);
   free(matrix);
@@ -179,6 +243,11 @@ long double acc96_relation_witness_norm2(
   for (size_t bit = 0; bit < ACC96_HANDLE_BITS; bit++)
     for (size_t digit = 0; digit < ACC96_GADGET_DIGITS; digit++)
       result += poly_norm2(&witness->right.right[bit][digit], ctx);
+  for (size_t block = 0; block < ACC96_REFRESH_BLOCKS; block++)
+    result += poly_norm2(&witness->refresh_z[block], ctx);
+  for (size_t byte = 0; byte < ACC96_REFRESH_BYTES; byte++)
+    result += (long double)__builtin_popcount(
+        (unsigned)witness->refresh_r[byte]);
   return result;
 }
 
@@ -443,5 +512,6 @@ void acc96_relation_make_kat_instance(
                           0x52393631U, (uint32_t)bit, (uint32_t)digit);
     }
   }
+  acc96_relation_refresh_sample(witness, seed);
   acc96_relation_evaluate(accumulator, pp, handle, witness, ctx);
 }

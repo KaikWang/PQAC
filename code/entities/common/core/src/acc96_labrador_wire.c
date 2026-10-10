@@ -9,8 +9,10 @@ static void put_u32(uint8_t out[4], uint32_t value) {
   out[3] = (uint8_t)(value >> 24);
 }
 
-static void put_i32(uint8_t out[4], int32_t value) {
-  put_u32(out, (uint32_t)value);
+static void put_i16(uint8_t out[2], int32_t value) {
+  const uint16_t narrowed = (uint16_t)(int16_t)value;
+  out[0] = (uint8_t)narrowed;
+  out[1] = (uint8_t)(narrowed >> 8);
 }
 
 static int tag_is_unit(const acc96_poly_t *tag) {
@@ -88,6 +90,8 @@ int acc96_labrador_prover_encode(
   offset += acc96_poly_pack(out + offset, accumulator);
   for (size_t bit = 0; bit < ACC96_HANDLE_BITS; bit++)
     out[offset++] = (uint8_t)((handle >> bit) & 1U);
+  memcpy(out + offset, witness->refresh_r, ACC96_REFRESH_BYTES);
+  offset += ACC96_REFRESH_BYTES;
 
   {
     const size_t witness_offset = offset;
@@ -102,7 +106,7 @@ int acc96_labrador_prover_encode(
       if (acc96_proof_slot_is_tag(slot)) continue;
       ordinal = slot - (slot > ACC96_PROOF_SLOT_TAG ? 1U : 0U);
       slot_offset = witness_offset +
-          ordinal * ACC96_WINDOW_PROOF_LIMBS * ACC96_N * 4U;
+          ordinal * ACC96_WINDOW_PROOF_LIMBS * ACC96_N * 2U;
       poly = acc96_proof_witness_poly_at(witness, slot);
       if (poly == NULL) {
         encode_ok = 0;
@@ -115,13 +119,19 @@ int acc96_labrador_prover_encode(
         encode_ok = 0;
         continue;
       }
+      for (size_t limb = 0; limb < ACC96_WINDOW_PROOF_LIMBS; limb++) {
+        if (digits[limb] < INT16_MIN || digits[limb] > INT16_MAX) {
+          encode_ok = 0;
+          continue;
+        }
+      }
       const size_t phase = coefficient % ACC96_LABRADOR_PHASES;
       const size_t phase_coefficient = coefficient / ACC96_LABRADOR_PHASES;
       const size_t phased =
           phase * ACC96_LABRADOR_BASE_DEGREE + phase_coefficient;
       for (size_t limb = 0; limb < ACC96_WINDOW_PROOF_LIMBS; limb++)
-        put_i32(out + slot_offset +
-                (limb * ACC96_N + phased) * 4U, digits[limb]);
+        put_i16(out + slot_offset +
+                (limb * ACC96_N + phased) * 2U, digits[limb]);
     }
     }
     if (!encode_ok) return 0;
@@ -135,7 +145,7 @@ int acc96_labrador_prover_encode(
 #endif
     for (size_t lane = 0; lane < ACC96_LIMBS; lane++) {
     const size_t lane_offset = lift_offset +
-        lane * ACC96_LIFT_PROOF_LIMBS * ACC96_N * 4U;
+        lane * ACC96_LIFT_PROOF_LIMBS * ACC96_N * 2U;
     for (size_t coefficient = 0; coefficient < ACC96_N; coefficient++) {
       int32_t digits[ACC96_LIFT_PROOF_LIMBS];
       if (!acc96_lift_proof_limb_decompose(
@@ -143,13 +153,19 @@ int acc96_labrador_prover_encode(
         encode_ok = 0;
         continue;
       }
+      for (size_t limb = 0; limb < ACC96_LIFT_PROOF_LIMBS; limb++) {
+        if (digits[limb] < INT16_MIN || digits[limb] > INT16_MAX) {
+          encode_ok = 0;
+          continue;
+        }
+      }
       const size_t phase = coefficient % ACC96_LABRADOR_PHASES;
       const size_t phase_coefficient = coefficient / ACC96_LABRADOR_PHASES;
       const size_t phased =
           phase * ACC96_LABRADOR_BASE_DEGREE + phase_coefficient;
       for (size_t limb = 0; limb < ACC96_LIFT_PROOF_LIMBS; limb++)
-        put_i32(out + lane_offset +
-                (limb * ACC96_N + phased) * 4U, digits[limb]);
+        put_i16(out + lane_offset +
+                (limb * ACC96_N + phased) * 2U, digits[limb]);
     }
     }
     if (!encode_ok) return 0;

@@ -6,20 +6,21 @@
 
 #include "revocable_ac.h"
 
-#define REVAC_Q96_LINK_MAGIC "RV88LK01"
-#define REVAC_Q96_INSTANCE_MAGIC "RV88IN01"
+#define REVAC_Q96_LINK_MAGIC "RV88LK02"
+#define REVAC_Q96_INSTANCE_MAGIC "RV88IN02"
 #define REVAC_Q96_LINK_MAGIC_BYTES 8U
 #define REVAC_Q96_LINK_DECOMP_BASE 256
 #define REVAC_Q96_LINK_DECOMP_LIMBS 4U
 #define REVAC_Q96_LINK_POLY_BYTES (PARAM_N * 4U)
 #define REVAC_Q96_LINK_WIRE_BYTES                                      \
-  (REVAC_Q96_LINK_MAGIC_BYTES + REVAC_CONTEXT_HASH_BYTES +             \
+  (REVAC_Q96_LINK_MAGIC_BYTES + 4U + 3U * REVAC_CONTEXT_HASH_BYTES +   \
    (PARAM_D + 2U * PARAM_D +                                           \
     PARAM_D * REVAC_Q96_LINK_DECOMP_LIMBS) *                           \
        REVAC_Q96_LINK_POLY_BYTES)
 #define REVAC_Q96_INSTANCE_WIRE_BYTES                                  \
-  (REVAC_Q96_LINK_MAGIC_BYTES + 4U + ACC96_POLY_PACKED_BYTES +         \
-   REVAC_CONTEXT_HASH_BYTES + PARAM_D * REVAC_Q96_LINK_POLY_BYTES)
+  (REVAC_Q96_LINK_MAGIC_BYTES + 4U + 4U + ACC96_POLY_PACKED_BYTES +    \
+   3U * REVAC_CONTEXT_HASH_BYTES +                                     \
+   PARAM_D * REVAC_Q96_LINK_POLY_BYTES)
 
 /* Local-only input for the q88 LaBRADOR prover.  It carries the public
  * q19 handle commitment followed by its private opening and exact-lift

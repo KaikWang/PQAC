@@ -1,0 +1,92 @@
+diff --git a/pack.c b/pack.c
+--- a/pack.c
++++ b/pack.c
+@@ -31,6 +31,33 @@
+   return value != NULL && value[0] != '\0' && value[0] != '0';
+ }
+ 
++/* Pack parameter generation historically continued a folding round only when
++ * the combined proof/witness size improved by at least ten percent.  Expose
++ * that engineering heuristic for controlled A/B experiments: every emitted
++ * round remains a normal LaBRADOR/Labradoodle round, while a higher threshold
++ * stops earlier and trades proof bytes for latency. */
++static double pack_improve_threshold(void) {
++  static int initialized = 0;
++  static double threshold = 0.90;
++  if (!initialized) {
++    const char *value = getenv("REVAC_LABRADOR_PACK_IMPROVE_THRESHOLD");
++    if (value != NULL && value[0] != '\0') {
++      char *end = NULL;
++      const double parsed = strtod(value, &end);
++      if (end != value && *end == '\0' && parsed > 0.0 && parsed < 1.0)
++        threshold = parsed;
++    }
++    initialized = 1;
++  }
++  return threshold;
++}
++
++static int pack_split_enabled(void) {
++  const char *value = getenv("REVAC_LABRADOR_PACK_SPLIT");
++  if (value == NULL || value[0] == '\0') return 1;
++  return value[0] != '0';
++}
++
+ static _Thread_local int last_prove_relation_valid = 1;
+ 
+ int pack_last_prove_relation_valid(void) {
+@@ -78,6 +105,7 @@
+   int compressed, tail, iszk, split, global_norm_check, transition, improve;
+   int ret;
+   double slack_norm_check;
++  const double improve_threshold = pack_improve_threshold();
+   statement sts[maxnp+1+1];
+   lab_params *cpp;
+ 
+@@ -102,7 +130,7 @@
+   compressed = 1;
+   tail = 0;
+   iszk = zk;
+-  split = 1;
++  split = pack_split_enabled();
+ 
+   do {
+ 
+@@ -124,7 +152,8 @@
+     ret = lab_params_gen(*cpp, &pisize[pp->np], &wtsize[pp->np+1], sts[pp->np], 
+                          compressed, tail, iszk, split, global_norm_check, 
+                          slack_norm_check);
+-    improve= ((double)(pisize[pp->np] + wtsize[pp->np+1])) < 0.9*wtsize[pp->np];
++    improve= ((double)(pisize[pp->np] + wtsize[pp->np+1])) <
++             improve_threshold*wtsize[pp->np];
+ 
+ 
+     if(ret || (!improve && !transition && pp->np > 0 && pp->zkround != pp->np-1)){
+@@ -206,7 +235,7 @@
+   compressed = 0;
+   tail = 0;
+   iszk = 0;
+-  split = 1;
++  split = pack_split_enabled();
+   global_norm_check = 1;
+   slack_norm_check = JL_L2_SLACK;
+   while(pp->np < maxnp){
+@@ -215,7 +244,8 @@
+     ret = lab_params_gen(*cpp, &pisize[pp->np], &wtsize[pp->np+1], sts[pp->np], 
+                          compressed, tail, iszk, split, global_norm_check, 
+                          slack_norm_check);
+-    improve= ((double)(pisize[pp->np] + wtsize[pp->np+1])) < 0.9*wtsize[pp->np];
++    improve= ((double)(pisize[pp->np] + wtsize[pp->np+1])) <
++             improve_threshold*wtsize[pp->np];
+ 
+     if(ret || (!improve && pp->np > 0 && !pp->p[pp->np-1]->compressed)){
+       if(!ret){ 
+@@ -241,7 +271,7 @@
+     compressed = 0;
+     tail = 1;
+     iszk = 0;
+-    split = 1;
++    split = pack_split_enabled();
+     global_norm_check = 0;
+     slack_norm_check = 1;
+     cpp = &pp->p[pp->np];

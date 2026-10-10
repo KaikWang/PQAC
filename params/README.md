@@ -5,9 +5,9 @@
 当前活动参数为 `revac128-candidate-v1.json`。它冻结了目前实验使用的精确数值和 profile ID，但仍是 **candidate**，不是已经完成安全证明的 128-bit 发布参数。未完成项会显示在生成的审计报告中，且 `--require-release` 会拒绝它。
 
 当前接入实体流程的累加器参数覆盖为
-`revac-q88-window10000-candidate-v1.json`（候选 D）：88-bit CRT
+`revac-q88-window50000-candidate-v2.json`（候选 D v2）：88-bit CRT
 模数、24-bit handle、balanced base-26007 的 6-digit gadget，以及
-10000 次撤销窗口。历史 `acc96_*` C/Python 符号仅作为兼容 API
+50000 次撤销窗口。历史 `acc96_*` C/Python 符号仅作为兼容 API
 保留；`RV88*` wire magic 保证旧 q96 载荷不会被误解码。运行
 
 ```bash

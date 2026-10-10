@@ -64,16 +64,16 @@ v = sum(j=0..5) digit[j] * 26007^j  (mod q)
 ```
 
 The revocation handle is 24 bits, the truncated SampleLeft gadget uses
-`base=13, k=24, l=2`, and a window accepts at most 10000 deletions before a
+`base=13, k=24, l=2`, and a window accepts at most 50000 deletions before a
 fresh setup/refresh.  The parameter audit gives the conditional arithmetic
 screen `beta_1 < q` up to 56245 deletions and margin
-`log2(q/beta_1)=2.492` at 10000 deletions.  This is an arithmetic condition,
+`log2(q/beta_1)=0.170` at 50000 deletions.  This is an arithmetic condition,
 not by itself a complete security proof.
 
 Canonical compact size projections are 44 KiB for the accumulator,
 7.219 MiB for the transmitted full witness, and 6.188 MiB for `Ba`.  Under the
 conservative zigzag bit-width projection, one four-layer DELTA4 is 516 KiB and
-an accumulated 10000-update DELTA4 is 684 KiB.  These DELTA4 projections are
+an accumulated 50000-update DELTA4 is 708 KiB.  These DELTA4 projections are
 not the same object as the signed T4-prefetch packet reported by the current
 demo.
 
@@ -246,9 +246,9 @@ With `REVAC_LABRADOR_ONLINE=1`, the UAV serializes a Labrador proof into
 `revac_show_proof_t.acc_zk_proof`, and `revac_gcs_verify_show()` verifies those
 proof bytes through `zk_lazer/revac_acc_memver_import_labrador.py`.
 
-### q96 worker prewarm and reproducible LaZer build
+### q88 worker prewarm, full-ring compiler, and reproducible LaZer build
 
-The q96 compiler has a large immutable statement.  Production code may move
+The q88 compiler has a large immutable statement.  Production code may move
 that construction out of the first latency-sensitive request by calling
 `revac_uav_memver_cache_prewarm()` and
 `revac_labrador_q96_prover_prewarm()` on the UAV after Issue and
@@ -260,11 +260,62 @@ mode-0600 local worker; neither operation is a network message.  The first and
 every subsequent show still use fresh link randomness and generate a fresh
 zero-knowledge proof.
 
+The local-only prover payload uses version `RV88PV04`: witness and exact-lift limbs are bounded by the int16 gate and are transmitted as little-endian int16 values. This reduces the private worker payload from 14.0 MiB to 7.0 MiB, saving about 7.0 MiB on prewarm, cache misses, and witness refreshes; the steady-state compact-reuse path already omits this payload. Public parameters, show proof bytes, transcripts, and security parameters are unchanged. Older `RV88PV03` payloads are rejected instead of being interpreted under the new layout.
+
 `revocable_ac_demo` performs both prewarms by default and reports their time
 separately from online show latency.  Set
 `REVAC_LABRADOR_Q96_PREWARM=0` to measure a true cold first show.  In a real
 cross-device deployment, UAV and GCS prewarm independently and never share a
 worker, statement object, or private witness.
+
+The default compiler maps each logical accumulator polynomial directly into a
+degree-4096 LaZer extension-ring element.  This replaces the former 16-phase
+layout's 288 Remark-4.3 selection constraints, 96 aggregation constraints, and
+48 accumulator constraints with 18, 6, and 3 constraints respectively.  The
+worker reconstructs every exact signed coefficient from the five-limb wire ABI
+and uses four balanced radix-32767 limbs inside the proof.  Their signed
+capacity is 58.999 bits, above the 57.528-bit deterministic coefficient gate
+for 50000 deletions.  The runtime norm audit also proves a 73.670-bit
+recomposed bound below the public 80-bit witness gate.  This proof-only
+encoding and the full-ring folding reduce the degree-256 backend relation
+without changing the accumulator state or arithmetic.
+Hidden handle bits and the 128-bit hidden Remark-4.3 value `r` remain binary
+degree-zero witnesses, and a coefficient-wise equality binds the degree-4096
+handle copy to the degree-256 q19 same-handle commitment copy.
+
+`REVAC_Q96_FULL_RING=0` selects the phased fallback for comparison.  The
+standalone `zk_lazer/revac_full_ring_kat.py` checks nontrivial degree-4096 linear
+and quadratic products, degree-zero rejection, and Pack Prove/Verify before the
+full entity test is run.
+
+On `autodl-pqac9` (2026-09-22), ten consecutive complete shows using the
+default four-limb profile, a 0.50 Pack improvement threshold, and eight-thread
+exact refresh all passed.  UAV generation averaged 5.306 seconds (median
+5.154, range 4.944--5.937); GCS wire verification averaged 2.886 seconds
+(median 2.875, range 2.775--2.986).  Cold worker prewarm was 6.530 seconds for
+the prover and 1.810 seconds for the verifier.  The accumulator proof envelope
+was about 194.0--194.5 KiB and the compressed complete show packet about
+213.4--219.2 KiB.  This replaces the earlier roughly 7.3--7.9/4.4--4.5-second
+default on the same class of full protocol run, at the cost of a larger proof.
+The 3/1-second generation/verification target is not yet met.  These figures
+are machine measurements, not protocol constants; signature rejection
+sampling causes normal per-show variance.
+
+After the `RV88PV04` int16 private-payload change, a fresh ten-show run on `autodl-pqac9` (2026-09-23) also passed all shows. UAV generation was 5.714 seconds on average (median 5.527, range 5.246--6.813) and GCS verification was 3.037 seconds on average (median 3.045, range 2.928--3.133). The proof envelope was 194.35--194.53 KiB and the complete compressed show packet was 213.54--213.91 KiB. The private prewarm payload was 7.00 MiB. The int16 change targets local payload transfer and memory, so it does not reduce steady-state proof bytes.
+
+Additional q88 experiments on the same host were kept as diagnostic ablations,
+not production settings.  Raising the LNP z1 sampler to the next discrete
+sigma (`REVAC_LNP_Z1_SIGMA=ceil`) reduced one profiled Pack-Prove phase from
+about 6.09 to 4.88 seconds, but five complete shows averaged about 5.48/3.06
+seconds and increased the accumulator envelope to about 201--205 KiB.  The
+default rounded sampler is therefore retained.  Three internal witness limbs
+(including radix 746219 with 16+8, 8+8+8, and 4+4+4+4 handle aggregation)
+were rejected by Dachshund's secure split/merge search; they are not valid
+shortcuts even though their elementary capacity and uint64 norm checks pass.
+Direct substitution of the right-limb aggregation variables and the phased
+degree-256 compiler were also tested: the former has no valid Dachshund
+parameterization, while the latter measured about 13.75/7.06 seconds.  None
+of these ablations changes the four-limb full-ring production profile.
 
 When the guarded GCS path verifies the anonymous-signature and accumulator
 components concurrently, it caps the signature verifier at four OpenMP
@@ -334,12 +385,11 @@ rebuilding the MemVer statement.  For compatibility, the Python importer also
 accepts old JSON without the new gadget fields and interprets it as the former
 base-2 gadget.
 
-The Labrador relation groups the 32 handle-indexed `right` polynomials for
-each `(gadget digit, output row)` pair.  This reduces 1536 separate right-side
-norm/witness parts to 48 vector parts.  Its current post-update norm schedule is
-a prototype engineering policy selected from the public deletion counter; it
-still needs to be replaced by a bound from the final accumulator parameter and
-security analysis before deployment.
+The Labrador relation groups the 24 handle-indexed `right` polynomials into
+rank-16 and rank-8 extension elements.  Its fixed public JL requirements imply
+`log2(||w||) <= 74.889`, below the fail-closed `2^80` MemVer gate.  A final
+security analysis must still justify the complete accumulator and proof-system
+parameter selection before deployment.
 
 The production show path now binds the handle in the signature relation to the
 handle in the accumulator MemVer relation through one randomized lattice

@@ -77,6 +77,9 @@ int revac_show_context_matches_public(
   if (ctx == NULL || public_state == NULL ||
       ctx->acc_profile != public_state->acc_profile ||
       ctx->acc_seq != public_state->acc_seq ||
+      ctx->window_id != public_state->window_id ||
+      memcmp(ctx->parameter_digest, public_state->parameter_digest,
+             REVAC_CONTEXT_HASH_BYTES) != 0 ||
       !revac_public_accumulator_digest(expected, public_state)) {
     return 0;
   }
@@ -281,6 +284,8 @@ void revac_show_context_init(revac_show_context_t *ctx) {
   memset(ctx->user_seed, 0, sizeof(ctx->user_seed));
   ctx->acc_profile = REVAC_ACC_PROFILE_Q19;
   ctx->acc_seq = 0;
+  ctx->window_id = 0;
+  memset(ctx->parameter_digest, 0, sizeof(ctx->parameter_digest));
   memset(ctx->acc_digest, 0, sizeof(ctx->acc_digest));
   poly_q_vec_d_init(ctx->acc);
 }
@@ -294,6 +299,11 @@ void revac_show_context_from_ta(revac_show_context_t *ctx,
                                 const uint8_t user_seed[SEED_BYTES]) {
   memcpy(ctx->user_seed, user_seed, SEED_BYTES);
   ctx->acc_profile = ta->acc_profile;
+  ctx->window_id = ta->acc_profile == REVAC_ACC_PROFILE_Q96
+                       ? ta->acc96_window_id
+                       : 0;
+  memcpy(ctx->parameter_digest, ta->context_pp_hash,
+         sizeof(ctx->parameter_digest));
   if (ta->acc_profile == REVAC_ACC_PROFILE_Q96) {
     ctx->acc_seq = ta->acc96_state != NULL ? ta->acc96_state->sequence : 0;
     poly_q_vec_d_zero(ctx->acc);
@@ -317,6 +327,9 @@ void revac_show_context_from_public(
   memcpy(ctx->user_seed, user_seed, SEED_BYTES);
   ctx->acc_profile = public_state->acc_profile;
   ctx->acc_seq = public_state->acc_seq;
+  ctx->window_id = public_state->window_id;
+  memcpy(ctx->parameter_digest, public_state->parameter_digest,
+         sizeof(ctx->parameter_digest));
   if (public_state->acc_profile == REVAC_ACC_PROFILE_Q96 ||
       public_state->acc == NULL) {
     poly_q_vec_d_zero(ctx->acc);
@@ -439,15 +452,21 @@ void revac_show_derive_crs_seed(uint8_t crs_seed[CRS_SEED_BYTES],
                                 const uint8_t nonce[REVAC_SHOW_NONCE_BYTES],
                                 revac_acc_profile_t acc_profile,
                                 uint32_t acc_seq,
+                                uint32_t window_id,
+                                const uint8_t parameter_digest[REVAC_CONTEXT_HASH_BYTES],
                                 const uint8_t acc_digest[REVAC_CONTEXT_HASH_BYTES]) {
+  static const uint8_t domain[] = "REVAC-SHOW-CRS-v2";
   keccak_state state;
 
   shake256_init(&state);
+  shake256_absorb(&state, domain, sizeof(domain) - 1);
   shake256_absorb(&state, ta_pk->seed, SEED_BYTES);
   shake256_absorb(&state, user_seed, SEED_BYTES);
   shake256_absorb(&state, nonce, REVAC_SHOW_NONCE_BYTES);
   revac_absorb_u32(&state, (uint32_t)acc_profile);
   revac_absorb_u32(&state, acc_seq);
+  revac_absorb_u32(&state, window_id);
+  shake256_absorb(&state, parameter_digest, REVAC_CONTEXT_HASH_BYTES);
   shake256_absorb(&state, acc_digest, REVAC_CONTEXT_HASH_BYTES);
   shake256_finalize(&state);
   shake256_squeeze(crs_seed, CRS_SEED_BYTES, &state);

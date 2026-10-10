@@ -87,7 +87,7 @@ int main(void) {
       !acc96_memver(state, survivor, survivor_witness, kat_bound, &ctx))
     return 1;
 
-  /* All deletion entry points must reject event 10001 before changing the
+  /* All deletion entry points must reject event 50001 before changing the
    * accumulator, member dictionary, sequence, or caller-owned update. */
   acc96_poly_set(&accumulator_at_limit, &state->accumulator);
   survivor_at_limit = state->members[1];
@@ -117,8 +117,8 @@ int main(void) {
 
   printf("q88 lifecycle passed: AccGen/Add/Delete/MemWitUp/MemVer; "
          "missing sampler, low norm, duplicate add/delete, revoked member "
-         "and tampering all rejected; deletion 10000 accepted and deletion "
-         "10001 rejected without state change. Setup %.3f s, algebraic SampleLeft/Add "
+         "and tampering all rejected; deletion 50000 accepted and deletion "
+         "50001 rejected without state change. Setup %.3f s, algebraic SampleLeft/Add "
          "%.3f s/member, Delete %.3f s, MemWitUp %.3f s, updated norm^2 "
          "%.0Lf. Algebraic SampleLeft was KAT-only.\n",
          setup_time, add_time, delete_time, update_time, updated_norm);

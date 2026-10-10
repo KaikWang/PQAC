@@ -179,7 +179,7 @@ int main(void) {
   verify_guard_initialized = 1;
 
   puts("累加器配置：q88 候选 D（兼容 acc96 API），24-bit handle，"
-       "balanced base-26007 x 6，10000-delete window。");
+       "balanced base-26007 x 6，50000-delete window。");
 
   if (!require(revac_ta_setup(&ta), "默认 q88 Setup/ACB trapdoor 认证失败")) {
     goto cleanup;
@@ -246,6 +246,16 @@ int main(void) {
   revac_show_context_from_public(&show_context, &public_state, uav2.pk.seed);
   if (!require(public_state.acc_profile == REVAC_ACC_PROFILE_Q96,
                "public state 没有选择 q96") ||
+      !require(public_state.window_id == 0 &&
+                   show_context.window_id == public_state.window_id,
+               "q96 Setup 没有从 window_id=0 开始") ||
+      !require(memcmp(public_state.parameter_digest,
+                      public_state.context_pp_hash,
+                      REVAC_CONTEXT_HASH_BYTES) == 0 &&
+                   memcmp(show_context.parameter_digest,
+                          public_state.parameter_digest,
+                          REVAC_CONTEXT_HASH_BYTES) == 0,
+               "q96 show context 没有显式绑定参数摘要") ||
       !require(show_context.acc_profile == REVAC_ACC_PROFILE_Q96 &&
                    revac_show_context_matches_public(&show_context,
                                                      &public_state),
@@ -258,8 +268,20 @@ int main(void) {
                "GCS q96 UAV1 明文门控失败") ||
       !require(revac_gcs_verify_uav(&public_state, &gcs, &uav2, msg),
                "GCS q96 UAV2 明文门控失败")) {
+      goto cleanup;
+  }
+  show_context.window_id ^= UINT32_C(1);
+  if (!require(!revac_show_context_matches_public(&show_context, &public_state),
+               "篡改 q96 window_id 后 context 仍被接受")) {
     goto cleanup;
   }
+  show_context.window_id ^= UINT32_C(1);
+  show_context.parameter_digest[0] ^= UINT8_C(1);
+  if (!require(!revac_show_context_matches_public(&show_context, &public_state),
+               "篡改 q96 参数摘要后 context 仍被接受")) {
+    goto cleanup;
+  }
+  show_context.parameter_digest[0] ^= UINT8_C(1);
   if (revac_labrador_online_enabled() && q96_prewarm_enabled()) {
     double started = monotonic_seconds();
     double prover_seconds;
@@ -322,6 +344,15 @@ int main(void) {
              "压缩后完整 show packet %.2f KiB。\n",
              run + 1, repetitions, prove_seconds, verify_seconds,
              show.acc_zk_proof_len / 1024.0, show_wire_len / 1024.0);
+      {
+        revac_public_state_t next_window_state = public_state;
+        next_window_state.window_id++;
+        if (!require(!revac_gcs_verify_show_accumulator(
+                         &next_window_state, &gcs, &show_context, &show),
+                     "旧窗口 q96 show 被新窗口状态接受")) {
+          goto cleanup;
+        }
+      }
     }
   } else if (!require(!revac_uav_show_prove(
                            &show, &public_state, &uav2, msg, nonce),

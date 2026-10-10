@@ -1,0 +1,42 @@
+diff --git a/polx.c b/polx.c
+--- a/polx.c
++++ b/polx.c
+@@ -1089,6 +1089,38 @@ void polxvec_exact_mul(polxvec r, const polxvec a, const polxvec b)
+ 
+   assert(a->len == 1 || a->len == b->len);
+   assert(r->len == b->len);
++  if(a->len == 1){
++    int64_t ac[N], acoeffs[N];
++    uint16_t apos[N];
++    size_t alen;
++    polx multiplier;
++    polz multiplierz;
++
++    /* Quadratic constraints commonly multiply a vector by one public
++     * polynomial.  Recover that polynomial once and retain only its nonzero
++     * coefficients.  In the q88 accumulator relation it is a degree-zero
++     * scalar, so this replaces one CRT recovery and an N^2 convolution per
++     * output polynomial with one shared recovery and an O(N) product. */
++    polx_frompolxvec(multiplier, a, 0);
++    polz_exact_frompolx(multiplierz, multiplier);
++    polz_exact_load(ac, multiplierz);
++    alen = polx_exact_sparse_coeffs(apos, acoeffs, ac);
++    for(i=0;i<r->len;i++){
++      __int128 acc[N] = {0};
++      polx rr, rb;
++      polz bz;
++      polxvec r_sv, result;
++
++      polx_frompolxvec(rb, b, i);
++      polz_exact_frompolx(bz, rb);
++      polx_exact_accumulate_sparse(acc, apos, acoeffs, alen, bz);
++      polx_exact_store(rr, acc);
++      polxvec_init_subvec2(r_sv, r, i, 1, 1);
++      polxvec_init_frompolx(result, rr);
++      polxvec_copy(r_sv, result);
++    }
++    return;
++  }
+   for(i=0;i<r->len;i++){
+     __int128 acc[N] = {0};
+     polx ra, rb;

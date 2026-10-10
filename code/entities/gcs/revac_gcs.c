@@ -213,6 +213,7 @@ static int revac_gcs_verify_show_signature_cached(
   }
   revac_show_derive_crs_seed(expected_crs, public_state->ta_pk, ctx->user_seed,
                              proof->nonce, ctx->acc_profile, ctx->acc_seq,
+                             ctx->window_id, ctx->parameter_digest,
                              ctx->acc_digest);
   /* Dx is the only public signature matrix keyed by the per-user seed.  Keep
      the much larger TA/static embedding cache shareable across all UAVs and
@@ -333,6 +334,7 @@ int revac_gcs_verify_show_signature(
   }
   revac_show_derive_crs_seed(expected_crs, public_state->ta_pk, ctx->user_seed,
                              proof->nonce, ctx->acc_profile, ctx->acc_seq,
+                             ctx->window_id, ctx->parameter_digest,
                              ctx->acc_digest);
 
   revac_show_lang_init(A_embed, B_embed, A3_embed, Ds_embed, D_embed, Dx_embed, u_embed);

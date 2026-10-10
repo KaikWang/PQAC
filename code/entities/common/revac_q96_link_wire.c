@@ -34,19 +34,29 @@ int revac_q96_link_wire_encode(
     const revac_public_state_t *public_state, uint32_t handle,
     const poly_q_vec_d randomness[2], const poly_q_vec_d commitment) {
   int64_t lift[PARAM_D][PARAM_N];
+  uint8_t accumulator_digest[REVAC_CONTEXT_HASH_BYTES];
   size_t offset = 0;
 
   if (out == NULL || public_state == NULL || randomness == NULL ||
       handle >= (UINT32_C(1) << ACC96_HANDLE_BITS) ||
       commitment == NULL || out_len != REVAC_Q96_LINK_WIRE_BYTES ||
+      public_state->acc_profile != REVAC_ACC_PROFILE_Q96 ||
+      !revac_public_accumulator_digest(accumulator_digest, public_state) ||
       !revac_same_handle_exact_lift(lift, public_state, handle, randomness,
                                     commitment)) {
     return 0;
   }
   memcpy(out + offset, REVAC_Q96_LINK_MAGIC, REVAC_Q96_LINK_MAGIC_BYTES);
   offset += REVAC_Q96_LINK_MAGIC_BYTES;
+  put_u32(out + offset, public_state->window_id);
+  offset += 4;
   memcpy(out + offset, public_state->context_pp_hash,
          REVAC_CONTEXT_HASH_BYTES);
+  offset += REVAC_CONTEXT_HASH_BYTES;
+  memcpy(out + offset, public_state->parameter_digest,
+         REVAC_CONTEXT_HASH_BYTES);
+  offset += REVAC_CONTEXT_HASH_BYTES;
+  memcpy(out + offset, accumulator_digest, REVAC_CONTEXT_HASH_BYTES);
   offset += REVAC_CONTEXT_HASH_BYTES;
 
   for (size_t row = 0; row < PARAM_D; row++) {
@@ -86,9 +96,11 @@ int revac_q96_instance_wire_encode(
     uint8_t *out, size_t out_len, const revac_public_state_t *public_state,
     const poly_q_vec_d commitment) {
   size_t offset = 0;
+  uint8_t accumulator_digest[REVAC_CONTEXT_HASH_BYTES];
   if (out == NULL || public_state == NULL || commitment == NULL ||
       public_state->acc_profile != REVAC_ACC_PROFILE_Q96 ||
       public_state->acc96_acc == NULL ||
+      !revac_public_accumulator_digest(accumulator_digest, public_state) ||
       out_len != REVAC_Q96_INSTANCE_WIRE_BYTES)
     return 0;
   memcpy(out + offset, REVAC_Q96_INSTANCE_MAGIC,
@@ -96,9 +108,16 @@ int revac_q96_instance_wire_encode(
   offset += REVAC_Q96_LINK_MAGIC_BYTES;
   put_u32(out + offset, public_state->acc96_seq);
   offset += 4;
+  put_u32(out + offset, public_state->window_id);
+  offset += 4;
   offset += acc96_poly_pack(out + offset, public_state->acc96_acc);
   memcpy(out + offset, public_state->context_pp_hash,
          REVAC_CONTEXT_HASH_BYTES);
+  offset += REVAC_CONTEXT_HASH_BYTES;
+  memcpy(out + offset, public_state->parameter_digest,
+         REVAC_CONTEXT_HASH_BYTES);
+  offset += REVAC_CONTEXT_HASH_BYTES;
+  memcpy(out + offset, accumulator_digest, REVAC_CONTEXT_HASH_BYTES);
   offset += REVAC_CONTEXT_HASH_BYTES;
   for (size_t row = 0; row < PARAM_D; row++) {
     for (size_t coefficient = 0; coefficient < PARAM_N; coefficient++) {

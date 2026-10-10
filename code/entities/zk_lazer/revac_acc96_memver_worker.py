@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Persistent same-device worker for the q96 MemVer + same-handle proof.
+"""Persistent same-device worker for the q88 MemVer + same-handle proof.
 
-The first request compiles the immutable statement: 96 exact rank-16/rank-8
-quadratic-aggregation equalities, 48 accumulator relations, and four
-same-handle relations.  A full prove request also installs the private witness;
-later requests bound to the identical PP ID, sequence, handle and accumulator
-reuse it while replacing the fresh same-handle opening.  Verification rebinds
-only the 52 dynamic public RHS values.  The Unix socket is local and mode 0600;
-private prover payloads are never an inter-device protocol.
+The default degree-4096 compiler builds 18 Remark-4.3 selection equalities,
+six rank-16/rank-8 aggregation equalities, three accumulator relations and four
+same-handle relations.  ``REVAC_Q96_FULL_RING=0`` selects the former phased
+288/96/48 layout.  A full prove request installs the private witness; later
+requests bound to the identical PP ID, sequence, handle and accumulator reuse
+it while replacing the fresh same-handle opening.  The Unix socket is local
+and mode 0600; private prover payloads are never an inter-device protocol.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import os
 import signal
@@ -43,6 +44,10 @@ os.environ.setdefault("REVAC_LABRADOR_THREADS", "1")
 # Use the exact six-prime LaZer lift by default; the approximate conversion can
 # be selected explicitly for diagnostics, but must not be the production path.
 os.environ.setdefault("REVAC_LABRADOR_EXACT_CRT", "1")
+# Exact CRT reconstruction has K=6 bounded positive residues.  Use the
+# branch-only centered reduction in this q88 profile; the generic library
+# keeps the original division path unless explicitly enabled.
+os.environ.setdefault("REVAC_LABRADOR_CRT_BOUNDED_REDUCE", "1")
 os.environ.setdefault("REVAC_LABRADOR_STATEMENT_THREADS", "8")
 os.environ.setdefault("REVAC_LABRADOR_PYTHON_STATEMENT_THREADS", "8")
 os.environ.setdefault("REVAC_LABRADOR_Q96_COMPACT_HASH", "1")
@@ -52,10 +57,23 @@ os.environ.setdefault("REVAC_LABRADOR_Q96_COMPACT_HASH", "1")
 # profiling, but make the stable sub-10-second AutoDL profile the default.
 os.environ.setdefault("REVAC_LABRADOR_QUADG_THREADS", "8")
 os.environ.setdefault("REVAC_LABRADOR_GARBAGE_PARALLEL", "1")
+os.environ.setdefault("REVAC_LABRADOR_ROTATION_THREADS", "8")
 os.environ.setdefault("REVAC_LABRADOR_POLXVEC_SCALAR_THREADS", "8")
 os.environ.setdefault("REVAC_LABRADOR_FROMPOLY_THREADS", "8")
 os.environ.setdefault("REVAC_LABRADOR_REFRESH_THREADS", "8")
-os.environ.setdefault("REVAC_LABRADOR_EXACT_REFRESH_THREADS", "1")
+# Exact refresh partitions its output by polynomial and owns all conversion
+# scratch inside the loop.  The q88 full-ring profile has tens of thousands
+# of independent outputs, so this is both race-free and large enough to
+# amortize one OpenMP team.
+os.environ.setdefault("REVAC_LABRADOR_EXACT_REFRESH_THREADS", "8")
+# Domain-separated Gaussian chunks are independent of the host thread count.
+# This dedicated budget accelerates LNP retries without enabling unrelated
+# nested LaBRADOR kernels through REVAC_LABRADOR_THREADS.
+os.environ.setdefault("REVAC_LABRADOR_GAUSSIAN_THREADS", "8")
+# Dachshund's quadratic-left constraints occupy a disjoint output range.
+# Build them on one worker thread while the main thread retains its existing
+# parallel exact CRT refresh for the quadratic aggregate.
+os.environ.setdefault("REVAC_LABRADOR_DCH_ADDCHECK_PARALLEL", "1")
 os.environ.setdefault("REVAC_LABRADOR_LDD_PROJECTION_THREADS", "8")
 os.environ.setdefault("REVAC_LABRADOR_LDD_PROJECTION_PARALLEL", "1")
 os.environ.setdefault("REVAC_LABRADOR_LDD_LING_THREADS", "12")
@@ -70,15 +88,71 @@ os.environ.setdefault("REVAC_LABRADOR_LDD_JL_SPROD_PARALLEL", "1")
 os.environ.setdefault("REVAC_LABRADOR_LDD_LIFT_THREADS", "4")
 os.environ.setdefault("REVAC_LABRADOR_LDD_LIFT_PARALLEL", "1")
 
-# These generic paths reach aliased views or transcript-sensitive reducers in
-# the q88 statement, so production keeps them serialized.
-os.environ.setdefault("REVAC_LABRADOR_LDD_PARALLEL", "0")
-os.environ.setdefault("REVAC_LABRADOR_POLXVEC_PARALLEL", "0")
+# The q88 full-ring LDD reducer has now passed ten complete online shows with
+# the stage-specific workers above and the generic reducer gate enabled. Keep
+# the escape hatch as an environment override for debugging or older hosts.
+os.environ.setdefault("REVAC_LABRADOR_LDD_PARALLEL", "1")
+# The q19 vector kernel path is deterministic and owns disjoint output slices.
+# Keep it enabled, with an explicit opt-out.
+os.environ.setdefault("REVAC_LABRADOR_POLXVEC_PARALLEL", "1")
+# Optional runtime CUDA backend.  It is capability based: hosts without the
+# separately built plugin fall back to the CPU kernels in polx.c.  It remains
+# opt-in because the complete q88 show currently issues only small sprod calls
+# (the audit maximum is about 3k coefficients), so no GPU call is dispatched
+# with the conservative threshold and enabling the loader adds no benefit.
+os.environ.setdefault("REVAC_LABRADOR_CUDA_SPROD", "0")
+os.environ.setdefault("REVAC_LABRADOR_CUDA_MIN_LEN", "32768")
 os.environ.setdefault("REVAC_LABRADOR_ZERO_PARALLEL", "0")
 os.environ.setdefault("REVAC_LABRADOR_COMMIT_PARALLEL", "0")
 
+_PHASE_THREAD_VARS = (
+    "REVAC_LABRADOR_LDD_PROJECTION_THREADS",
+    "REVAC_LABRADOR_LDD_LING_THREADS",
+    "REVAC_LABRADOR_LDD_COLLAPSE_JL_THREADS",
+    "REVAC_LABRADOR_LDD_ZQ_THREADS",
+    "REVAC_LABRADOR_LDD_JL_SPROD_THREADS",
+    "REVAC_LABRADOR_LDD_LIFT_THREADS",
+    "REVAC_LABRADOR_REFRESH_THREADS",
+    "REVAC_LABRADOR_EXACT_REFRESH_THREADS",
+    "REVAC_LABRADOR_ROTATION_THREADS",
+)
+_BASE_PHASE_THREAD_VALUES = {
+    name: os.environ.get(name) for name in _PHASE_THREAD_VARS
+}
+
+def _apply_phase_thread_budget(phase: str) -> None:
+    """Apply optional per-phase native thread settings for this worker.
+
+    The socket worker handles requests serially, so changing these environment
+    variables at the request boundary cannot race another proof.  A phase
+    override is useful when verification and proving need different OpenMP
+    budgets; absent overrides retain the production defaults above.
+    """
+    suffix = phase.upper()
+    for name in _PHASE_THREAD_VARS:
+        value = os.environ.get(f"{name}_{suffix}",
+                               _BASE_PHASE_THREAD_VALUES[name])
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+# Dachshund split parallelism remains an opt-in diagnostic.  On q88's current
+# workload its extra team creation outweighed the saved witness derivation.
+
+# The proof-only encoding reconstructs the exact signed q88 coefficient from
+# the five-limb wire ABI, then uses four radix-(2^15-1) limbs internally.  Its
+# 59-bit signed capacity covers the complete 50000-delete coefficient gate
+# (57.528 bits), while reducing the resident Pack relation.  A 0.50 folding
+# threshold is the measured low-latency point on the current portable build;
+# both settings remain explicit in the bound worker profile below.
+os.environ.setdefault("REVAC_Q96_COMPACT_WITNESS_LIMBS", "1")
+os.environ.setdefault("REVAC_Q96_COMPACT_WITNESS_COUNT", "4")
+os.environ.setdefault("REVAC_Q96_COMPACT_WITNESS_RADIX", "32767")
+os.environ.setdefault("REVAC_LABRADOR_PACK_IMPROVE_THRESHOLD", "0.50")
+
 from revac_acc96_memver_labrador import (
-    Q96StatementCache, _aggregated_quadratics_enabled, build_statement,
+    Q96StatementCache, _aggregated_quadratics_enabled, _full_ring_enabled,
+    build_statement,
 )
 from revac_acc96_wire import (
     INSTANCE_BYTES, LINK_BYTES, POLY_BYTES, PROVER_BYTES, InstancePayload,
@@ -99,34 +173,69 @@ REUSE_PREFIX_BYTES = 8 + 4 + 4 + POLY_BYTES
 class ReuseMiss(Exception):
     """The local worker has no witness matching a compact reuse request."""
 
-def _bind_deployment_profile(entry: dict[str, Any],
-                             context_hash: bytes) -> bytes:
-    """Bind compact Pack proofs to public q96 PP and q19 link matrices.
+def _bind_deployment_profile(entry: dict[str, Any], context_hash: bytes,
+                             parameter_digest: bytes, window_id: int,
+                             sequence: int,
+                             accumulator_digest: bytes) -> bytes:
+    """Bind static Pack parameters and a dynamic show transcript context.
 
     Pack parameter serialization contains process-local representation details
     and is therefore not a canonical cross-device identifier.  Both parties
-    instead generate their own parameters from the same canonical zero-RHS
-    statement and bind the compact envelope to the authenticated public PP,
-    the seed that expands the q19 link matrices, and an explicit compiler ABI.
+    independently generate parameters from the same canonical zero-RHS
+    statement.  The resident static profile binds the q88 PP, q19 link matrix
+    seed, parameter digest and compiler ABI.  A separate per-show profile also
+    binds the window and exact accumulator state, without invalidating the
+    expensive static Pack parameter cache after each deletion.
     """
     previous = entry.get("link_context_hash")
     if previous is not None and previous != context_hash:
         raise ValueError("q96 worker link-matrix context changed within PP cache")
     entry["link_context_hash"] = context_hash
-    compiler_layout = (b"rank16x8-aggregate-v3-compact-hash" if
-                       _aggregated_quadratics_enabled() else
-                       b"direct-quadratics-v3-compact-hash")
-    profile_id = hashlib.shake_256(
-        b"REVAC-Q88-LABRADOR38-DEPLOYMENT-PROFILE-V1\x00" +
+    previous_parameters = entry.get("parameter_digest")
+    if (previous_parameters is not None and previous_parameters != parameter_digest):
+        raise ValueError("q96 worker parameter digest changed within PP cache")
+    entry["parameter_digest"] = parameter_digest
+    if _full_ring_enabled():
+        aggregate_chunks = os.environ.get(
+            "REVAC_Q96_AGGREGATE_CHUNK_BITS", "0").encode("ascii")
+        compact_limbs = os.environ.get(
+            "REVAC_Q96_COMPACT_WITNESS_LIMBS", "0").encode("ascii")
+        compact_count = os.environ.get(
+            "REVAC_Q96_COMPACT_WITNESS_COUNT", "4").encode("ascii")
+        compact_radix = os.environ.get(
+            "REVAC_Q96_COMPACT_WITNESS_RADIX", "auto").encode("ascii")
+        scalar_refresh = os.environ.get(
+            "REVAC_Q96_SCALAR_REFRESH_BITS", "0").encode("ascii")
+        if os.environ.get("REVAC_Q96_DIRECT_RIGHT_QUAD", "0") != "0":
+            compiler_layout = b"degree4096-direct-right-refresh128-v3"
+        else:
+            compiler_layout = b"degree4096-aggregate-refresh128-v2"
+        compiler_layout += (b"-chunks" + aggregate_chunks +
+                            b"-limbs" + compact_limbs +
+                            b"-count" + compact_count +
+                            b"-radix" + compact_radix +
+                            b"-scalar-refresh" + scalar_refresh +
+                            b"-compact-hash")
+    elif _aggregated_quadratics_enabled():
+        compiler_layout = b"rank16x8-aggregate-refresh128-sparse-v5-compact-hash"
+    else:
+        compiler_layout = b"direct-quadratics-refresh128-sparse-v5-compact-hash"
+    static_profile_id = hashlib.shake_256(
+        b"REVAC-Q88-LABRADOR38-STATIC-PROFILE-V2\x00" +
         compiler_layout + b"\x00" +
-        entry["pp_id"] + context_hash
+        entry["pp_id"] + context_hash + parameter_digest
     ).digest(HASH_BYTES)
     for cache_name in ("prove_statement", "verify_statement"):
         cache: Q96StatementCache = entry[cache_name]
-        if cache.profile_id is not None and cache.profile_id != profile_id:
+        if (cache.profile_id is not None and
+                cache.profile_id != static_profile_id):
             raise ValueError("q96 resident statement profile binding changed")
-        cache.profile_id = profile_id
-    return profile_id
+        cache.profile_id = static_profile_id
+    return hashlib.shake_256(
+        b"REVAC-Q88-LABRADOR38-SHOW-CONTEXT-V2\x00" +
+        static_profile_id + struct.pack("<II", window_id, sequence) +
+        accumulator_digest
+    ).digest(HASH_BYTES)
 
 
 def _recv_full(conn: socket.socket, size: int) -> bytes:
@@ -156,6 +265,7 @@ def send_frame(conn: socket.socket, payload: bytes) -> None:
 
 def prove(dynamic: bytes, entry: dict[str, Any],
           reuse: bool = False) -> tuple[bytes, bool]:
+    _apply_phase_thread_budget("prove")
     total_started = time.perf_counter()
     stage_started = time.perf_counter()
     if reuse:
@@ -176,7 +286,11 @@ def prove(dynamic: bytes, entry: dict[str, Any],
             raise ValueError("invalid q96 worker prove payload length")
         prover = ProverPayload(dynamic[:PROVER_BYTES])
         link = LinkPayload.decode(dynamic[PROVER_BYTES:])
-    _bind_deployment_profile(entry, link.context_hash)
+    if link.accumulator_digest != prover.accumulator_digest:
+        raise ValueError("q96 link/prover accumulator digest mismatch")
+    request_profile_id = _bind_deployment_profile(
+        entry, link.context_hash, link.parameter_digest, link.window_id,
+        prover.sequence, link.accumulator_digest)
     print(f"[q96 worker timing] "
           f"{'reuse cached prover/link' if reuse else 'decode prover/link'}: "
           f"{time.perf_counter() - stage_started:.6f} s", flush=True)
@@ -266,7 +380,7 @@ def prove(dynamic: bytes, entry: dict[str, Any],
     stage_started = time.perf_counter()
     proof_bytes = serialize_labrador38_proof(
         params, proof, require_zk=True,
-        compact_profile_id=cache.bind_profile_id())
+        compact_profile_id=request_profile_id)
     print(f"[q96 worker timing] compact proof serialization: "
           f"{time.perf_counter() - stage_started:.6f} s", flush=True)
     # The resident cache owns only ps and params.  Every returned proof is a
@@ -289,8 +403,15 @@ def prepare_prover(dynamic: bytes, entry: dict[str, Any]) -> bool:
         raise ValueError("invalid q96 prover-prewarm payload length")
     prover = ProverPayload(dynamic[:PROVER_BYTES])
     link = LinkPayload.decode(dynamic[PROVER_BYTES:])
-    _bind_deployment_profile(entry, link.context_hash)
+    if link.accumulator_digest != prover.accumulator_digest:
+        raise ValueError("q96 link/prover accumulator digest mismatch")
+    _bind_deployment_profile(
+        entry, link.context_hash, link.parameter_digest, link.window_id,
+        prover.sequence, link.accumulator_digest)
     cache: Q96StatementCache = entry["prove_statement"]
+    verifier_cache: Q96StatementCache = entry["verify_statement"]
+    if cache.refresh_bank is None and verifier_cache.refresh_bank is not None:
+        cache.refresh_bank = verifier_cache.refresh_bank
     cache_hit = cache.ps is not None
     started = time.perf_counter()
     build_statement(
@@ -307,8 +428,16 @@ def prepare_verifier(dynamic: bytes, entry: dict[str, Any]) -> bool:
     if len(dynamic) != INSTANCE_BYTES:
         raise ValueError("invalid q96 verifier-prewarm payload length")
     instance = InstancePayload.decode(dynamic)
-    _bind_deployment_profile(entry, instance.context_hash)
+    _bind_deployment_profile(
+        entry, instance.context_hash, instance.parameter_digest,
+        instance.window_id, instance.sequence, instance.accumulator_digest)
     cache: Q96StatementCache = entry["verify_statement"]
+    prover_cache: Q96StatementCache = entry["prove_statement"]
+    if cache.refresh_bank is None and prover_cache.refresh_bank is not None:
+        # The seed-expanded Remark-4.3 matrix bank is immutable and depends
+        # only on the PP.  Sharing it avoids repeating the dominant cold-start
+        # expansion for the second resident statement in this local worker.
+        cache.refresh_bank = prover_cache.refresh_bank
     cache_hit = cache.ps is not None
     started = time.perf_counter()
     build_statement(
@@ -320,6 +449,7 @@ def prepare_verifier(dynamic: bytes, entry: dict[str, Any]) -> bool:
 
 
 def verify(dynamic: bytes, entry: dict[str, Any]) -> tuple[bool, bool]:
+    _apply_phase_thread_budget("verify")
     total_started = time.perf_counter()
     if len(dynamic) < INSTANCE_BYTES + 4:
         raise ValueError("truncated q96 worker verify payload")
@@ -329,7 +459,9 @@ def verify(dynamic: bytes, entry: dict[str, Any]) -> tuple[bool, bool]:
         raise ValueError("invalid q96 worker proof length")
     stage_started = time.perf_counter()
     instance = InstancePayload.decode(dynamic[:INSTANCE_BYTES])
-    _bind_deployment_profile(entry, instance.context_hash)
+    request_profile_id = _bind_deployment_profile(
+        entry, instance.context_hash, instance.parameter_digest,
+        instance.window_id, instance.sequence, instance.accumulator_digest)
     prover = ZeroProverPayload(instance)
     link = PublicLinkPayload(instance)
     cache: Q96StatementCache = entry["verify_statement"]
@@ -343,7 +475,7 @@ def verify(dynamic: bytes, entry: dict[str, Any]) -> tuple[bool, bool]:
     params, proof, refs = deserialize_labrador38_proof(
         dynamic[INSTANCE_BYTES + 4:], require_zk=True,
         reset_comkey=False, cached_params_obj=cache,
-        expected_profile_id=cache.bind_profile_id())
+        expected_profile_id=request_profile_id)
     print(f"[q96 worker timing] compact proof deserialization: "
           f"{time.perf_counter() - stage_started:.6f} s", flush=True)
     from lazer import lib
@@ -351,9 +483,14 @@ def verify(dynamic: bytes, entry: dict[str, Any]) -> tuple[bool, bool]:
     stage_started = time.perf_counter()
     try:
         ok = bool(pack_verify((params, proof), ps.output_statement(), "38"))
+        print(f"[q96 worker timing] Pack Verify call only: "
+              f"{time.perf_counter() - stage_started:.6f} s", flush=True)
     finally:
+        cleanup_started = time.perf_counter()
         lib.labrador38_py_free_proof(proof)
         refs.clear()
+        print(f"[q96 worker timing] Pack Verify cleanup: "
+              f"{time.perf_counter() - cleanup_started:.6f} s", flush=True)
     print(f"[q96 worker timing] native Pack Verify: "
           f"{time.perf_counter() - stage_started:.6f} s", flush=True)
     print(f"[q96 worker timing] verify request total: "

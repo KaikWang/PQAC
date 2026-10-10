@@ -26,9 +26,10 @@
    normal signed q96 BML update remains small. */
 #define REVAC_Q96_SYNC_WITNESS_POLYS                                  \
   ((size_t)2 + ACC96_TRUNC_RIGHT + 1 +                               \
-   (size_t)ACC96_HANDLE_BITS * ACC96_GADGET_DIGITS)
+   (size_t)ACC96_HANDLE_BITS * ACC96_GADGET_DIGITS +                  \
+   ACC96_REFRESH_BLOCKS)
 #define REVAC_Q96_SYNC_WITNESS_BYTES                                  \
-  (REVAC_Q96_SYNC_WITNESS_POLYS * ACC96_N * 4U)
+  (ACC96_REFRESH_BYTES + REVAC_Q96_SYNC_WITNESS_POLYS * ACC96_N * 4U)
 #define REVAC_Q96_SYNC_WIRE_HEADER_BYTES 156
 
 int revac_sync_request_create(revac_sync_request_t *request,

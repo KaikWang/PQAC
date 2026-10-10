@@ -367,6 +367,8 @@ int acc96_sampleleft_secure(acc96_relation_witness_t *out,
   acc96_poly_t *w = calloc(1, sizeof(*w));
   acc96_poly_t *temporary = calloc(1, sizeof(*temporary));
   acc96_poly_t *right_contribution = calloc(1, sizeof(*right_contribution));
+  acc96_poly_t *refresh_contribution = calloc(1, sizeof(*refresh_contribution));
+  uint8_t refresh_seed[ACC96_SEED_BYTES];
   arb_poly_t center0, center12, sampled12, difference, correction, zero;
   arb_t center_scale;
   acc96_u128 power = ACC96_TRUNC_BASE;
@@ -375,13 +377,17 @@ int acc96_sampleleft_secure(acc96_relation_witness_t *out,
       sampler == NULL || ctx == NULL || !ctx->initialized ||
       sampler->trapdoor != trapdoor || p_left == NULL || p12 == NULL ||
       p2 == NULL || y == NULL || w == NULL || temporary == NULL ||
-      right_contribution == NULL)
+      right_contribution == NULL || refresh_contribution == NULL)
     goto raw_cleanup;
   memset(out, 0, sizeof(*out));
+  randombytes(refresh_seed, sizeof(refresh_seed));
+  acc96_relation_refresh_sample(out, refresh_seed);
   if (!sample_right(&out->right)) goto raw_cleanup;
   acc96_member_matrix_apply(right_contribution, &pp->ba, handle,
                             &out->right, ctx);
   acc96_poly_sub(w, accumulator, right_contribution);
+  acc96_relation_refresh_apply(refresh_contribution, pp, out, ctx);
+  acc96_poly_sub(w, w, refresh_contribution);
 
   arb_poly_init(center0);
   arb_poly_init(center12);
@@ -464,6 +470,8 @@ arb_cleanup:
   arb_poly_clear(center12);
   arb_poly_clear(center0);
 raw_cleanup:
+  memset(refresh_seed, 0, sizeof(refresh_seed));
+  free(refresh_contribution);
   free(right_contribution);
   free(temporary);
   free(w);

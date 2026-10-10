@@ -20,10 +20,13 @@
 #define ACC96_DELTA6_LAYERS 6U
 #define ACC96_PUBLIC_DELTA_LAYERS ACC96_DELTA6_LAYERS
 #define ACC96_TAIL4_BIT 4U
+#define ACC96_REFRESH_BITS 128U
+#define ACC96_REFRESH_BYTES (ACC96_REFRESH_BITS / 8U)
+#define ACC96_REFRESH_BLOCKS ACC96_GADGET_DIGITS
 /* The proof parameters and witness norm bound are instantiated for one
  * replacement-free window containing at most this many deletions.  A fresh
  * window must be created before accepting another deletion. */
-#define ACC96_MAX_DELETIONS_PER_WINDOW 10000U
+#define ACC96_MAX_DELETIONS_PER_WINDOW 50000U
 
 typedef struct {
   acc96_poly_t right[ACC96_DELTA4_LAYERS][ACC96_GADGET_DIGITS];
@@ -40,6 +43,7 @@ typedef struct {
   acc96_poly_t trunc_b[ACC96_TRUNC_RIGHT];
   acc96_ba_t ba;
   acc96_poly_t ua;
+  uint8_t refresh_seed[ACC96_SEED_BYTES];
 } acc96_relation_pp_t;
 
 typedef struct {
@@ -48,6 +52,8 @@ typedef struct {
   acc96_poly_t v2[ACC96_TRUNC_RIGHT];
   acc96_poly_t tag;
   acc96_evalfx_delta_t right;
+  uint8_t refresh_r[ACC96_REFRESH_BYTES];
+  acc96_poly_t refresh_z[ACC96_REFRESH_BLOCKS];
 } acc96_relation_witness_t;
 
 typedef struct {
@@ -77,6 +83,19 @@ void acc96_relation_uniform_poly(
     uint32_t domain,
     uint32_t first,
     uint32_t second);
+
+/* Remark 4.3 / Construction E.1 branch A_r=A_0+sum_i r_i A_i.  The q88
+ * rank-one specialization has one row of ACC96_REFRESH_BLOCKS ring elements
+ * in each seeded A_i and one short ring element per block in z. */
+void acc96_relation_refresh_matrix_poly(
+    acc96_poly_t *out, const acc96_relation_pp_t *pp,
+    size_t matrix_index, size_t block);
+void acc96_relation_refresh_apply(
+    acc96_poly_t *out, const acc96_relation_pp_t *pp,
+    const acc96_relation_witness_t *witness, const acc96_ctx_t *ctx);
+void acc96_relation_refresh_sample(
+    acc96_relation_witness_t *witness,
+    const uint8_t seed[ACC96_SEED_BYTES]);
 
 /* Evaluate the exact MemVer left-hand side in R_q. */
 void acc96_relation_evaluate(acc96_poly_t *out,

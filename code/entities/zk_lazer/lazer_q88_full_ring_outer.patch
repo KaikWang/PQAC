@@ -1,0 +1,40 @@
+diff --git a/python/lazer_cffi_build.py b/python/lazer_cffi_build.py
+--- a/python/lazer_cffi_build.py
++++ b/python/lazer_cffi_build.py
+@@ -42,5 +42,6 @@ int PREFIXpy_append_quadratic_monomials(PREFIXstatement st, size_t nlin, size_t
+ int PREFIXpy_append_deg0_constraint(PREFIXstatement st, size_t idx, size_t deg);
+ int PREFIXpy_append_deg0_vector_constraints(PREFIXstatement st, size_t idx, size_t count);
++int PREFIXpy_append_deg0_logical_vector_constraints(PREFIXstatement st, size_t idx, size_t count, size_t deg);
+ int PREFIXpy_seeded_uniform_matrix_bank(int32_t *out, const uint8_t seed[32], size_t matrices, size_t blocks, size_t rows, size_t cols, size_t degree, uint32_t q, uint32_t qbits, uint32_t domain_separator);
+ int PREFIXpy_refresh_set_witness(PREFIXwitness wt, const size_t *chunk_idx, const size_t *lift_idx, const int32_t *bank, const uint8_t *bits, size_t bit_count, size_t blocks, size_t rows, size_t cols, size_t degree, int64_t q, int64_t base, size_t chunks);
+ int PREFIXpy_statement_set_norms(PREFIXstatement st, size_t count, const uint64_t *normsq);
+diff --git a/src/labrados32_py.h b/src/labrados32_py.h
+--- a/src/labrados32_py.h
++++ b/src/labrados32_py.h
+@@ -329,5 +329,6 @@ int labrador32_py_append_quadratic_monomials(labrador32_statement st, size_t nl
+ int labrador32_py_append_deg0_constraint(labrador32_statement st, size_t idx, size_t deg);
+ int labrador32_py_append_deg0_vector_constraints(labrador32_statement st, size_t idx, size_t count);
++int labrador32_py_append_deg0_logical_vector_constraints(labrador32_statement st, size_t idx, size_t count, size_t deg);
+ int labrador32_py_seeded_uniform_matrix_bank(int32_t *out, const uint8_t seed[32], size_t matrices, size_t blocks, size_t rows, size_t cols, size_t degree, uint32_t q, uint32_t qbits, uint32_t domain_separator);
+ int labrador32_py_refresh_set_witness(labrador32_witness wt, const size_t *chunk_idx, const size_t *lift_idx, const int32_t *bank, const uint8_t *bits, size_t bit_count, size_t blocks, size_t rows, size_t cols, size_t degree, int64_t q, int64_t base, size_t chunks);
+ int labrador32_py_statement_set_norms(labrador32_statement st, size_t count, const uint64_t *normsq);
+diff --git a/src/labrados36_py.h b/src/labrados36_py.h
+--- a/src/labrados36_py.h
++++ b/src/labrados36_py.h
+@@ -329,5 +329,6 @@ int labrador36_py_append_quadratic_monomials(labrador36_statement st, size_t nl
+ int labrador36_py_append_deg0_constraint(labrador36_statement st, size_t idx, size_t deg);
+ int labrador36_py_append_deg0_vector_constraints(labrador36_statement st, size_t idx, size_t count);
++int labrador36_py_append_deg0_logical_vector_constraints(labrador36_statement st, size_t idx, size_t count, size_t deg);
+ int labrador36_py_seeded_uniform_matrix_bank(int32_t *out, const uint8_t seed[32], size_t matrices, size_t blocks, size_t rows, size_t cols, size_t degree, uint32_t q, uint32_t qbits, uint32_t domain_separator);
+ int labrador36_py_refresh_set_witness(labrador36_witness wt, const size_t *chunk_idx, const size_t *lift_idx, const int32_t *bank, const uint8_t *bits, size_t bit_count, size_t blocks, size_t rows, size_t cols, size_t degree, int64_t q, int64_t base, size_t chunks);
+ int labrador36_py_statement_set_norms(labrador36_statement st, size_t count, const uint64_t *normsq);
+diff --git a/src/labrados38_py.h b/src/labrados38_py.h
+--- a/src/labrados38_py.h
++++ b/src/labrados38_py.h
+@@ -329,5 +329,6 @@ int labrador38_py_append_quadratic_monomials(labrador38_statement st, size_t nl
+ int labrador38_py_append_deg0_constraint(labrador38_statement st, size_t idx, size_t deg);
+ int labrador38_py_append_deg0_vector_constraints(labrador38_statement st, size_t idx, size_t count);
++int labrador38_py_append_deg0_logical_vector_constraints(labrador38_statement st, size_t idx, size_t count, size_t deg);
+ int labrador38_py_seeded_uniform_matrix_bank(int32_t *out, const uint8_t seed[32], size_t matrices, size_t blocks, size_t rows, size_t cols, size_t degree, uint32_t q, uint32_t qbits, uint32_t domain_separator);
+ int labrador38_py_refresh_set_witness(labrador38_witness wt, const size_t *chunk_idx, const size_t *lift_idx, const int32_t *bank, const uint8_t *bits, size_t bit_count, size_t blocks, size_t rows, size_t cols, size_t degree, int64_t q, int64_t base, size_t chunks);
+ int labrador38_py_statement_set_norms(labrador38_statement st, size_t count, const uint64_t *normsq);

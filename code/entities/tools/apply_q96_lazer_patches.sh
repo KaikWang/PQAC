@@ -34,6 +34,16 @@ apply_once "$lazer_root" \
   "$entities_dir/zk_lazer/lazer_q96_outer_full.patch"
 apply_once "$lazer_root/src/labrados" \
   "$entities_dir/zk_lazer/lazer_q96_labrados_full.patch"
+apply_once "$lazer_root/src/labrados" \
+  "$entities_dir/zk_lazer/lazer_q96_pack_tuning.patch"
+apply_once "$lazer_root" \
+  "$entities_dir/zk_lazer/lazer_q88_full_ring_outer.patch"
+apply_once "$lazer_root/src/labrados" \
+  "$entities_dir/zk_lazer/lazer_q88_full_ring_labrados.patch"
+apply_once "$lazer_root/src/labrados" \
+  "$entities_dir/zk_lazer/lazer_q88_sparse_exact_mul.patch"
+apply_once "$lazer_root/src/labrados" \
+  "$entities_dir/zk_lazer/lazer_q88_engine_followup.patch"
 
 profile_source="$entities_dir/zk_lazer/labrados_overlay/revac_profile.h"
 profile_target="$lazer_root/src/labrados/revac_profile.h"

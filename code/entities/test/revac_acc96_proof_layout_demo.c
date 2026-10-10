@@ -138,8 +138,9 @@ int main(void) {
     return 1;
   if (ACC96_LABRADOR_PHASES != 16U || !check_polyphase_product(&ctx))
     return 1;
-  if (ACC96_PROOF_WITNESS_POLYS != 169U ||
-      ACC96_PROOF_NON_TAG_POLYS != 168U ||
+  if (ACC96_PROOF_WITNESS_POLYS != 175U ||
+      ACC96_PROOF_NON_TAG_POLYS != 174U ||
+      ACC96_PROOF_SLOT_REFRESH_Z_FIRST != 169U ||
       ACC96_PROOF_SLOT_TAG != 24U)
     return 1;
   for (size_t slot = 0; slot < ACC96_PROOF_WITNESS_POLYS; slot++) {
@@ -215,7 +216,7 @@ int main(void) {
   }
   printf("q88 proof layout passed: generic 4 x 28-bit and windowed "
          "5 x radix-8191 layouts; per-update bound=%lld; "
-         "10000-update gate=%lld; degree-256 compact chunk norm^2 <= 2^33; "
+         "50000-update gate=%lld; degree-256 compact chunk norm^2 <= 2^33; "
          "16-phase negacyclic product preserved.\n",
          (long long)ACC96_WINDOW_UPDATE_COEFF_BOUND,
          (long long)ACC96_WINDOW_COEFF_BOUND);

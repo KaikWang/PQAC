@@ -20,10 +20,10 @@
 
 /* The generic 4x28 layout above can encode every centered q88 residue, but it
  * is unnecessarily large for a windowed credential witness.  EvalFx emits
- * balanced gadget digits bounded by 13003, hence 10000 updates add at most
+ * balanced gadget digits bounded by 13003, hence 50000 updates add at most
  * A coefficient of ginv_apply is a sum of at most 6*4096 products of two
  * such digits.  Consequently one update is bounded by
- * 6*4096*13003^2 < 2^42, and 10000 updates plus a 2^30-1 fresh-witness gate
+ * 6*4096*13003^2 < 2^42, and 50000 updates plus a 2^30-1 fresh-witness gate
  * fit a common five-limb signed representation shared by all three CRT
  * equations.  Although LaBRADOR can store int16_t, using the maximum radix
  * makes the conservative JL norm too large for secure Dachshund parameters.
@@ -46,12 +46,12 @@
 #define ACC96_WINDOW_PROOF_CHUNK_NORM2_BOUND (UINT64_C(1) << 33)
 
 /* Conservative exact-lift gate.  With tag fixed to 1, every lane contains
- * 167 public-polynomial convolutions; 168*N*W is a simple strict envelope
+ * 173 public-polynomial convolutions; 174*N*W is a simple strict envelope
  * after division by the ~30-bit lane modulus, where W is the common witness
  * coefficient gate.  Six balanced radix-8191 limbs cover this <2^75 bound
  * while keeping the LaBRADOR JL norm parameterizable. */
 #define ACC96_LIFT_COEFF_BOUND \
-  ((acc96_u128)168U * ACC96_N * (acc96_u128)ACC96_WINDOW_COEFF_BOUND)
+  ((acc96_u128)174U * ACC96_N * (acc96_u128)ACC96_WINDOW_COEFF_BOUND)
 #define ACC96_LIFT_PROOF_LIMB_BITS ACC96_WINDOW_PROOF_LIMB_BITS
 #define ACC96_LIFT_PROOF_LIMBS 7U
 #define ACC96_LIFT_PROOF_LIMB_RADIX ACC96_WINDOW_PROOF_LIMB_RADIX
@@ -68,9 +68,11 @@
 #define ACC96_PROOF_SLOT_TAG \
   (ACC96_PROOF_SLOT_V2_FIRST + ACC96_TRUNC_RIGHT)
 #define ACC96_PROOF_SLOT_RIGHT_FIRST (ACC96_PROOF_SLOT_TAG + 1U)
-#define ACC96_PROOF_WITNESS_POLYS \
+#define ACC96_PROOF_SLOT_REFRESH_Z_FIRST \
   (ACC96_PROOF_SLOT_RIGHT_FIRST + \
    ACC96_HANDLE_BITS * ACC96_GADGET_DIGITS)
+#define ACC96_PROOF_WITNESS_POLYS \
+  (ACC96_PROOF_SLOT_REFRESH_Z_FIRST + ACC96_REFRESH_BLOCKS)
 #define ACC96_PROOF_NON_TAG_POLYS (ACC96_PROOF_WITNESS_POLYS - 1U)
 
 size_t acc96_proof_right_slot(size_t bit, size_t digit);
@@ -102,7 +104,7 @@ int acc96_proof_poly_decompose(
 uint64_t acc96_proof_poly_max_chunk_norm2(
     const int32_t limbs[ACC96_PROOF_LIMBS][ACC96_N]);
 
-/* Compact representation used by the 10000-deletion window relation.  It
+/* Compact representation used by the 50000-deletion window relation.  It
  * deliberately rejects a coefficient outside the public window gate instead
  * of silently falling back to the generic four-limb encoding. */
 int acc96_window_proof_limb_decompose(

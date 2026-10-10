@@ -141,6 +141,10 @@ typedef struct {
   /* Public seed retained so a remote prover/verifier expands the fixed q96
      matrices locally instead of transferring the multi-megabyte pp. */
   uint8_t acc96_public_seed[ACC96_SEED_BYTES];
+  /* Remark 4.3 refresh-window identifier.  Setup starts at window zero; this
+     implementation fails closed at the 50000-deletion boundary until an
+     authenticated refresh/reissue operation is implemented. */
+  uint32_t acc96_window_id;
   acc96_sampleleft_fn acc96_sampler;
   void *acc96_sampler_opaque;
   /* Non-NULL only for the Setup-owned production q96 sampler cache. */
@@ -157,6 +161,11 @@ typedef struct {
   const __poly_q_vec_d *acc;
   uint32_t acc_seq;
   uint8_t context_pp_hash[REVAC_CONTEXT_HASH_BYTES];
+  uint32_t window_id;
+  /* Explicit digest of the accumulator/credential parameter set.  It is
+     currently equal to context_pp_hash, but remains a separate protocol field
+     so a future refresh can authenticate independently versioned parameters. */
+  uint8_t parameter_digest[REVAC_CONTEXT_HASH_BYTES];
   /* TA-owned read-only BML records.  A cross-device decoder owns equivalent
      records after authenticating their DELTA4 packets. */
   const revac_bml_entry_t *bml[ACC_GENPP_BML_CAPACITY];
@@ -241,6 +250,8 @@ typedef struct {
   uint8_t user_seed[SEED_BYTES];
   revac_acc_profile_t acc_profile;
   uint32_t acc_seq;
+  uint32_t window_id;
+  uint8_t parameter_digest[REVAC_CONTEXT_HASH_BYTES];
   /* Canonical digest of the accumulator value.  This keeps the show context
      constant-size for both q19 and q96 while binding the CRS to the exact
      public accumulator state. */
@@ -320,6 +331,8 @@ void revac_show_derive_crs_seed(uint8_t crs_seed[CRS_SEED_BYTES],
                                 const uint8_t nonce[REVAC_SHOW_NONCE_BYTES],
                                 revac_acc_profile_t acc_profile,
                                 uint32_t acc_seq,
+                                uint32_t window_id,
+                                const uint8_t parameter_digest[REVAC_CONTEXT_HASH_BYTES],
                                 const uint8_t acc_digest[REVAC_CONTEXT_HASH_BYTES]);
 
 #endif

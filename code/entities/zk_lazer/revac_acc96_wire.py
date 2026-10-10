@@ -33,51 +33,64 @@ GADGET_BASE = 26007
 GADGET_DIGITS = 6
 TRUNC_BASE = 13
 TRUNC_RIGHT = 22
-WITNESS_POLYS = 169
+REFRESH_BITS = 128
+REFRESH_BYTES = REFRESH_BITS // 8
+REFRESH_BLOCKS = GADGET_DIGITS
+REFRESH_Z_FIRST_SLOT = 169
+WITNESS_POLYS = 175
 TAG_SLOT = 24
-NON_TAG_POLYS = 168
+NON_TAG_POLYS = 174
 WITNESS_LIMBS = 5
 LIFT_LIMBS = 7
 # This proof radix is deliberately below the int16_t storage limit.  The
 # smaller digits keep LaBRADOR's conservative JL norm parameterizable.
 LIMB_RADIX = 4095
 LIMB_BOUND = 2047
-PUBLIC_MAGIC = b"RV88PP02"
-PROVER_MAGIC = b"RV88PV02"
+PUBLIC_MAGIC = b"RV88PP03"
+PROVER_MAGIC = b"RV88PV04"
 COEFF_BYTES = 11
 POLY_BYTES = N * COEFF_BYTES
 PUBLIC_BYTES = 8 + 32 + TRUNC_RIGHT * POLY_BYTES
-PROVER_BYTES = (8 + 8 + POLY_BYTES + HANDLE_BITS +
-                NON_TAG_POLYS * WITNESS_LIMBS * N * 4 +
-                LANES * LIFT_LIMBS * N * 4)
+PROVER_BYTES = (8 + 8 + POLY_BYTES + HANDLE_BITS + REFRESH_BYTES +
+                NON_TAG_POLYS * WITNESS_LIMBS * N * 2 +
+                LANES * LIFT_LIMBS * N * 2)
 Q19 = 405769
 Q19_D = 4
 Q19_N = 256
 LINK_DECOMP_BASE = 256
 LINK_DECOMP_LIMBS = 4
-LINK_MAGIC = b"RV88LK01"
-LINK_BYTES = (8 + 32 +
+LINK_MAGIC = b"RV88LK02"
+LINK_BYTES = (8 + 4 + 3 * 32 +
               (Q19_D + 2 * Q19_D + Q19_D * LINK_DECOMP_LIMBS) *
               Q19_N * 4)
-INSTANCE_MAGIC = b"RV88IN01"
-INSTANCE_BYTES = 8 + 4 + POLY_BYTES + 32 + Q19_D * Q19_N * 4
+INSTANCE_MAGIC = b"RV88IN02"
+INSTANCE_BYTES = (8 + 4 + 4 + POLY_BYTES + 3 * 32 +
+                  Q19_D * Q19_N * 4)
 
 
-def _i32_view(raw: bytes, offset: int, count: int) -> memoryview:
-    end = offset + count * 4
+def _accumulator_digest(packed: bytes | memoryview) -> bytes:
+    if len(packed) != POLY_BYTES:
+        raise ValueError("invalid q88 packed accumulator length")
+    return hashlib.shake_256(
+        b"REVAC-ACCUMULATOR-STATE-v1" + struct.pack("<I", 1) + bytes(packed)
+    ).digest(32)
+
+
+def _i16_view(raw: bytes, offset: int, count: int) -> memoryview:
+    end = offset + count * 2
     if end > len(raw):
-        raise ValueError("truncated q96 int32 limb payload")
-    return memoryview(raw)[offset:end].cast("i")
+        raise ValueError("truncated q96 int16 limb payload")
+    return memoryview(raw)[offset:end].cast("h")
 
 
-def _i32_within_bound(values: memoryview, bound: int) -> bool:
+def _i16_within_bound(values: memoryview, bound: int) -> bool:
     """Constant-result range gate with a native vectorized fast path."""
     if not values:
         return True
     if _np is not None:
-        array = _np.frombuffer(values, dtype=_np.int32)
-        # Comparing min/max directly also handles INT32_MIN without the
-        # signed-overflow corner case of abs(INT32_MIN).
+        array = _np.frombuffer(values, dtype=_np.int16)
+        # Comparing min/max directly also handles INT16_MIN without the
+        # signed-overflow corner case of abs(INT16_MIN).
         return int(array.min()) >= -bound and int(array.max()) <= bound
     return all(-bound <= int(value) <= bound for value in values)
 
@@ -141,6 +154,14 @@ class PublicParameters:
             raise IndexError("q96 Ba index out of range")
         return _uniform_poly(self.seed, 0x44393631, bit, digit)
 
+    def refresh(self, matrix: int, block: int) -> list[int]:
+        if (not 0 <= matrix <= REFRESH_BITS or
+                not 0 <= block < REFRESH_BLOCKS):
+            raise IndexError("q88 refresh matrix index out of range")
+        refresh_seed = hashlib.shake_256(
+            b"REVAC-Q88-REMARK-4.3-v1" + self.seed).digest(32)
+        return _uniform_poly(refresh_seed, 0x52383841, matrix, block)
+
 
 class ProverPayload:
     def __init__(self, raw: bytes):
@@ -149,6 +170,8 @@ class ProverPayload:
         self.raw = raw
         self.sequence, self.handle = struct.unpack_from("<II", raw, 8)
         offset = 16
+        self.accumulator_digest = _accumulator_digest(
+            raw[offset:offset + POLY_BYTES])
         self.accumulator = tuple(_canonical_coefficients(
             raw[offset:offset + POLY_BYTES]))
         offset += POLY_BYTES
@@ -158,16 +181,21 @@ class ProverPayload:
                               for bit in range(HANDLE_BITS))
         if self.handle_vector != expected_bits:
             raise ValueError("q96 prover handle bits are not canonical")
+        self.refresh_r = bytes(raw[offset:offset + REFRESH_BYTES])
+        offset += REFRESH_BYTES
+        self.refresh_r_bits = tuple(
+            (self.refresh_r[bit >> 3] >> (bit & 7)) & 1
+            for bit in range(REFRESH_BITS))
         limb_count = NON_TAG_POLYS * WITNESS_LIMBS * N
-        self.witness_limbs = _i32_view(raw, offset, limb_count)
-        offset += limb_count * 4
-        self.lift_limbs = _i32_view(raw, offset, LANES * LIFT_LIMBS * N)
-        offset += LANES * LIFT_LIMBS * N * 4
+        self.witness_limbs = _i16_view(raw, offset, limb_count)
+        offset += limb_count * 2
+        self.lift_limbs = _i16_view(raw, offset, LANES * LIFT_LIMBS * N)
+        offset += LANES * LIFT_LIMBS * N * 2
         if offset != len(raw):
             raise ValueError("trailing q96 prover payload data")
-        if not _i32_within_bound(self.witness_limbs, LIMB_BOUND):
+        if not _i16_within_bound(self.witness_limbs, LIMB_BOUND):
             raise ValueError("q96 witness limb exceeds LaBRADOR int16 gate")
-        if not _i32_within_bound(self.lift_limbs, LIMB_BOUND):
+        if not _i16_within_bound(self.lift_limbs, LIMB_BOUND):
             raise ValueError("q96 exact-lift limb exceeds LaBRADOR int16 gate")
 
     @staticmethod
@@ -223,8 +251,11 @@ class InstancePayload:
     """Public per-show input consumed by a GCS verifier."""
 
     sequence: int
+    window_id: int
     accumulator: tuple[int, ...]
     context_hash: bytes
+    parameter_digest: bytes
+    accumulator_digest: bytes
     commitment: tuple[tuple[int, ...], ...]
 
     @classmethod
@@ -232,12 +263,20 @@ class InstancePayload:
         if len(raw) != INSTANCE_BYTES or raw[:8] != INSTANCE_MAGIC:
             raise ValueError("invalid q96 public verifier instance")
         sequence = struct.unpack_from("<I", raw, 8)[0]
-        offset = 12
+        window_id = struct.unpack_from("<I", raw, 12)[0]
+        offset = 16
+        packed_accumulator = raw[offset:offset + POLY_BYTES]
         accumulator = tuple(_canonical_coefficients(
-            raw[offset:offset + POLY_BYTES]))
+            packed_accumulator))
         offset += POLY_BYTES
         context_hash = raw[offset:offset + 32]
         offset += 32
+        parameter_digest = raw[offset:offset + 32]
+        offset += 32
+        accumulator_digest = raw[offset:offset + 32]
+        offset += 32
+        if accumulator_digest != _accumulator_digest(packed_accumulator):
+            raise ValueError("q88 public instance accumulator digest mismatch")
         commitment = []
         for _ in range(Q19_D):
             values = struct.unpack_from(f"<{Q19_N}I", raw, offset)
@@ -247,7 +286,8 @@ class InstancePayload:
             commitment.append(tuple(values))
         if offset != len(raw):
             raise ValueError("trailing q96 public verifier instance data")
-        return cls(sequence, accumulator, context_hash, tuple(commitment))
+        return cls(sequence, window_id, accumulator, context_hash,
+                   parameter_digest, accumulator_digest, tuple(commitment))
 
 
 class ZeroProverPayload:
@@ -258,6 +298,7 @@ class ZeroProverPayload:
         self.handle = 0
         self.accumulator = instance.accumulator
         self.handle_vector = (0,) * HANDLE_BITS
+        self.refresh_r_bits = (0,) * REFRESH_BITS
         self._zero = (0,) * PHASE_N
 
     def witness_phase(self, slot: int, limb: int,
@@ -304,6 +345,9 @@ def _q19_center(value: int) -> int:
 @dataclass(frozen=True)
 class LinkPayload:
     context_hash: bytes
+    window_id: int
+    parameter_digest: bytes
+    accumulator_digest: bytes
     commitment: tuple[tuple[int, ...], ...]
     randomness: tuple[tuple[tuple[int, ...], ...], ...]
     lift_limbs: tuple[tuple[tuple[int, ...], ...], ...]
@@ -313,7 +357,13 @@ class LinkPayload:
         if len(raw) != LINK_BYTES or raw[:8] != LINK_MAGIC:
             raise ValueError("invalid q96 same-handle link payload")
         offset = 8
+        window_id = struct.unpack_from("<I", raw, offset)[0]
+        offset += 4
         context_hash = raw[offset:offset + 32]
+        offset += 32
+        parameter_digest = raw[offset:offset + 32]
+        offset += 32
+        accumulator_digest = raw[offset:offset + 32]
         offset += 32
 
         def read_i32_poly() -> tuple[int, ...]:
@@ -340,7 +390,8 @@ class LinkPayload:
             raise ValueError("q19 link lift digit exceeds radix-256 bound")
         if offset != len(raw):
             raise ValueError("trailing q96 same-handle link payload data")
-        return cls(context_hash, commitment, randomness, lift_limbs)
+        return cls(context_hash, window_id, parameter_digest,
+                   accumulator_digest, commitment, randomness, lift_limbs)
 
     def public_matrices(self) -> tuple[
             tuple[tuple[tuple[int, ...], ...], ...],
@@ -401,6 +452,9 @@ class PublicLinkPayload:
 
     def __init__(self, instance: InstancePayload):
         self.context_hash = instance.context_hash
+        self.window_id = instance.window_id
+        self.parameter_digest = instance.parameter_digest
+        self.accumulator_digest = instance.accumulator_digest
         self.commitment = instance.commitment
         zero = (0,) * Q19_N
         self.randomness = tuple(tuple(zero for _ in range(Q19_D))
@@ -442,7 +496,10 @@ def audit_integer_relation(public: PublicParameters, prover: ProverPayload,
     atrap = public.atrap()
     ba = {(bit, digit): public.ba(bit, digit)
           for bit in range(HANDLE_BITS)
-          for digit in range(GADGET_DIGITS)}
+                   for digit in range(GADGET_DIGITS)}
+    refresh = {(matrix, block): public.refresh(matrix, block)
+               for matrix in range(REFRESH_BITS + 1)
+               for block in range(REFRESH_BLOCKS)}
     for lane, modulus in enumerate(MODULI):
         atrap_lane = [_center_lane(value, lane) for value in atrap]
         trunc_lane = [[_center_lane(value, lane) for value in poly]
@@ -470,6 +527,19 @@ def audit_integer_relation(public: PublicParameters, prover: ProverPayload,
                         expression -= _center_lane(scale, lane) * right[output]
                     scale *= GADGET_BASE
                 scale = 1
+            for block in range(REFRESH_BLOCKS):
+                composed = list(refresh[(0, block)])
+                for bit, selected in enumerate(prover.refresh_r_bits):
+                    if selected:
+                        selected_poly = refresh[(bit + 1, block)]
+                        composed = [(left + right) % Q96
+                                    for left, right in zip(
+                                        composed, selected_poly)]
+                composed_lane = [_center_lane(value, lane)
+                                 for value in composed]
+                z = witness[REFRESH_Z_FIRST_SLOT + block]
+                expression += _negacyclic_coefficient(
+                    composed_lane, z, output)
             accumulator = _center_lane(prover.accumulator[output], lane)
             if expression + modulus * lifts[lane][output] != accumulator:
                 raise ValueError(

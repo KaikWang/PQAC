@@ -28,6 +28,7 @@ from revac_acc96_wire import (
     InstancePayload, LIFT_LIMBS, LINK_DECOMP_BASE, LINK_DECOMP_LIMBS,
     LinkPayload, PublicLinkPayload, ZeroProverPayload, N,
     NON_TAG_POLYS, PHASE_N, PHASES, ProverPayload, PublicParameters, Q19,
+    REFRESH_BITS, REFRESH_BLOCKS, REFRESH_Z_FIRST_SLOT,
     TAG_SLOT, TRUNC_BASE, TRUNC_RIGHT, WITNESS_LIMBS, WITNESS_POLYS,
     _center_lane,
 )
@@ -36,7 +37,24 @@ from revac_profile_generated import PROOF_MODULUS
 
 VECTOR_COEFF_BOUND = 4095
 AGGREGATE_LIMBS = 4
-AGGREGATE_RANKS = (16, 8)
+REFRESH_AHAT_LIMBS = 3
+try:
+    _aggregate_chunk_bits = int(os.environ.get(
+        "REVAC_Q96_AGGREGATE_CHUNK_BITS", "0"))
+except ValueError as exc:
+    raise ValueError(
+        "REVAC_Q96_AGGREGATE_CHUNK_BITS must be an integer") from exc
+if _aggregate_chunk_bits == 0:
+    AGGREGATE_RANKS = (16, 8)
+elif (_aggregate_chunk_bits > 0 and
+      _aggregate_chunk_bits & (_aggregate_chunk_bits - 1) == 0 and
+      HANDLE_BITS % _aggregate_chunk_bits == 0):
+    AGGREGATE_RANKS = ((_aggregate_chunk_bits,) *
+                       (HANDLE_BITS // _aggregate_chunk_bits))
+else:
+    raise ValueError(
+        "REVAC_Q96_AGGREGATE_CHUNK_BITS must be 0 or a power-of-two "
+        "divisor of HANDLE_BITS")
 if sum(AGGREGATE_RANKS) != HANDLE_BITS:
     raise ValueError("q88 aggregate extension ranks do not cover the handle")
 AGGREGATE_SLICES = tuple(
@@ -55,9 +73,18 @@ def _aggregated_quadratics_enabled() -> bool:
     return os.environ.get("REVAC_Q96_AGGREGATED_QUAD", "1") != "0"
 
 
+def _full_ring_enabled() -> bool:
+    """Use the degree-4096 q88 compiler; zero selects the phased fallback."""
+    return os.environ.get("REVAC_Q96_FULL_RING", "1") != "0"
+
+
 def _aggregation_constraint_count(accumulator_constraints: int) -> int:
     return (accumulator_constraints * len(AGGREGATE_RANKS)
             if _aggregated_quadratics_enabled() else 0)
+
+
+def _refresh_constraint_count() -> int:
+    return LANES * PHASES * REFRESH_BLOCKS
 
 # LaBRADOR stores exact norm bounds in uint64_t, while Dachshund's exact-norm
 # path only accepts a much smaller per-vector bound.  The q96 wire digits are
@@ -87,15 +114,32 @@ ACC96_PUBLIC_WITNESS_NORM_LOG2 = 80.0
 PACK_APPROX_NORM_SQ_FLOOR = 1 << 47
 
 
+def _pack_approx_norm_sq_floor() -> int:
+    """Return the optional engineering floor above the derived JL bound."""
+    value = os.environ.get("REVAC_Q96_PACK_NORM_FLOOR_BITS")
+    if value is None or value == "":
+        return PACK_APPROX_NORM_SQ_FLOOR
+    try:
+        bits = int(value, 10)
+    except ValueError as exc:
+        raise ValueError(
+            "REVAC_Q96_PACK_NORM_FLOOR_BITS must be an integer") from exc
+    if not 0 <= bits <= 47:
+        raise ValueError(
+            "REVAC_Q96_PACK_NORM_FLOOR_BITS must be in [0, 47]")
+    return 0 if bits == 0 else 1 << bits
+
+
 class Q96StatementCache:
     """One resident native q96 statement and its generated Pack parameters.
 
     Only witness slots and the 52 dynamic right-hand-side polynomials vary.
-    The rank-16/rank-8 aggregation constraints have an immutable zero RHS;
-    48 accumulator RHS values change only with the accumulator and four
-    randomized same-handle commitments change for every show.  The native
-    statement owns the immutable coefficient graph; keeping it alive avoids
-    rebuilding millions of Python/CFFI objects.
+    The 288 A_r selection constraints and 96 rank-16/rank-8 aggregation
+    constraints form an immutable prefix.  The 48 accumulator RHS values
+    change only with the accumulator and four randomized same-handle
+    commitments change for every show.  The native statement owns the
+    immutable coefficient graph; keeping it alive avoids rebuilding millions
+    of Python/CFFI objects.
     """
 
     def __init__(self) -> None:
@@ -107,8 +151,9 @@ class Q96StatementCache:
         self.params_owned = False
         self._params_bytes: bytes | None = None
         self.profile_id: bytes | None = None
-        # Transcript state after optional static rank-16/rank-8 aggregation
-        # constraints.  Dynamic accumulator RHS rebinding starts here.
+        # Transcript state after the static A_r selection constraints and
+        # optional rank-16/rank-8 aggregation constraints.  Dynamic
+        # accumulator RHS rebinding starts here.
         self.aggregation_prefix_hash: bytes | None = None
         # Transcript state immediately after the 48 accumulator constraints.
         # It is keyed by the public accumulator value.  The four randomized
@@ -120,6 +165,9 @@ class Q96StatementCache:
         # opening.  On an exact private-payload cache hit the 19k-polynomial
         # q96 witness is unchanged; only these slots need refreshing.
         self.link_witness_indices: tuple[int, ...] | None = None
+        # Canonical lane/phase expansion of the 129 x 6 seeded Remark-4.3
+        # matrix bank.  Shape: matrix, lane, phase, block, coefficient.
+        self.refresh_bank: Any | None = None
 
     def checked_params(self, require_zk: bool = True) -> Any:
         from lazer import lib
@@ -147,7 +195,7 @@ class Q96StatementCache:
             # stronger deployment profile ID derived from the encoded q96 PP
             # and q19 link-matrix seed before constructing this cache.
             self.profile_id = hashlib.shake_256(
-                b"REVAC-Q88-LABRADOR38-PACK-PROFILE-V1\x00" +
+                b"REVAC-Q88-LABRADOR38-PACK-PROFILE-V2-REFRESH128\x00" +
                 self.serialized_bytes(require_zk=True)
             ).digest(32)
         return self.profile_id
@@ -305,18 +353,19 @@ def _vector_bound(dimension: int) -> int:
     return dimension * PHASE_N * VECTOR_COEFF_BOUND * VECTOR_COEFF_BOUND
 
 
-def _balanced_radix_limbs(values: Any, limbs: int) -> list[Any]:
-    """Exact centered base-LIMB_RADIX decomposition over the proof modulus."""
-    if LIMB_RADIX % 2 != 1:
+def _balanced_radix_limbs(values: Any, limbs: int,
+                          radix: int = LIMB_RADIX) -> list[Any]:
+    """Exact centered odd-radix decomposition over the proof modulus."""
+    if radix % 2 != 1:
         raise ValueError("q96 aggregate decomposition needs an odd radix")
-    half = LIMB_RADIX // 2
+    half = radix // 2
     if _np is not None:
         remaining = _np.asarray(values, dtype=_np.int64).copy()
         out = []
         for _ in range(limbs):
-            digit = (remaining + half) % LIMB_RADIX - half
+            digit = (remaining + half) % radix - half
             out.append(digit)
-            remaining = (remaining - digit) // LIMB_RADIX
+            remaining = (remaining - digit) // radix
         if _np.any(remaining != 0):
             raise ValueError("q96 aggregate needs more radix limbs")
         return out
@@ -326,10 +375,10 @@ def _balanced_radix_limbs(values: Any, limbs: int) -> list[Any]:
         digit_polys = []
         next_remaining = []
         for poly in remaining:
-            digits = [((value + half) % LIMB_RADIX) - half for value in poly]
+            digits = [((value + half) % radix) - half for value in poly]
             digit_polys.append(digits)
             next_remaining.append([
-                (value - digit) // LIMB_RADIX
+                (value - digit) // radix
                 for value, digit in zip(poly, digits)
             ])
         out.append(digit_polys)
@@ -337,6 +386,25 @@ def _balanced_radix_limbs(values: Any, limbs: int) -> list[Any]:
     if any(value != 0 for poly in remaining for value in poly):
         raise ValueError("q96 aggregate needs more radix limbs")
     return out
+
+
+def _refresh_lane_phase_bank(public: PublicParameters) -> Any:
+    """Expand the seeded q88 A_i bank once into the three CRT phase views."""
+    if _np is None:
+        raise ValueError("q88 randomized refresh requires NumPy")
+    bank = _np.empty(
+        (REFRESH_BITS + 1, LANES, PHASES, REFRESH_BLOCKS, PHASE_N),
+        dtype=_np.int64)
+    for matrix in range(REFRESH_BITS + 1):
+        for block in range(REFRESH_BLOCKS):
+            canonical = public.refresh(matrix, block)
+            for lane, modulus in enumerate(MODULI):
+                values = _np.fromiter(
+                    (int(value) % modulus for value in canonical),
+                    dtype=_np.int64, count=N)
+                bank[matrix, lane, :, block, :] = _np.transpose(
+                    values.reshape(PHASE_N, PHASES))
+    return bank
 
 
 def _next_power_of_two(value: int) -> int:
@@ -349,12 +417,14 @@ def _approx_norm_requirement(dimension: int) -> int:
     deterministic = _vector_bound(dimension)
     derived = _next_power_of_two(math.ceil(
         deterministic * JL_INF_SLACK * JL_INF_SLACK))
-    return max(derived, PACK_APPROX_NORM_SQ_FLOOR)
+    return max(derived, _pack_approx_norm_sq_floor())
 
 
 def _audit_norm_profile(
         dimensions: list[int], approximate_bounds: dict[int, int],
-        accumulator_witness_indices: set[int]) -> None:
+        accumulator_witness_indices: set[int],
+        *, limb_radix: int = LIMB_RADIX,
+        limb_count: int = WITNESS_LIMBS) -> None:
     if not accumulator_witness_indices <= approximate_bounds.keys():
         raise ValueError("q96 accumulator witness norm accounting is incomplete")
     for index, requirement in approximate_bounds.items():
@@ -363,7 +433,7 @@ def _audit_norm_profile(
         if requirement < minimum or requirement & (requirement - 1):
             raise ValueError("invalid q96 per-vector JL norm requirement")
 
-    # For each accumulator polynomial, Cauchy--Schwarz across the five radix
+    # For each accumulator polynomial, Cauchy--Schwarz across the radix
     # limbs gives ||sum_j B^j w_j||^2 <= sum_j B^(2j) sum_j ||w_j||^2.
     # The grouped vectors partition those witness coefficients, so summing
     # only their public JL requirements proves a beta_0 implication.  Exact
@@ -374,8 +444,8 @@ def _audit_norm_profile(
         approximate_bounds[index] for index in accumulator_witness_indices)
     recomposed_log2 = (0.5 * math.log2(aggregate_required_norm_sq) +
                        0.5 * math.log2(sum(
-                           LIMB_RADIX ** (2 * limb)
-                           for limb in range(WITNESS_LIMBS))))
+                           limb_radix ** (2 * limb)
+                           for limb in range(limb_count))))
     if recomposed_log2 >= ACC96_PUBLIC_WITNESS_NORM_LOG2:
         raise ValueError(
             "q96 Labrador limb norm no longer implies the accumulator "
@@ -547,6 +617,13 @@ def build_statement(public: PublicParameters, prover: Any,
     from lazer import ffi, lib, polyring_t, poly_t, polyvec_t
     from labrados import proof_statement
 
+    if _full_ring_enabled():
+        from revac_acc96_full_ring import build_statement_full_ring
+        return build_statement_full_ring(
+            public, prover, link, prove, constraint_filter,
+            fold_handle_for_debug, check_witness, cache,
+            reuse_accumulator_witness, prepare_prover)
+
     build_started = time.perf_counter()
     compact_hash = os.environ.get(
         "REVAC_LABRADOR_Q96_COMPACT_HASH", "0") != "0"
@@ -623,7 +700,9 @@ def build_statement(public: PublicParameters, prover: Any,
                                    else LANES * PHASES)
         aggregation_constraints = _aggregation_constraint_count(
             accumulator_constraints)
-        constraint_count = accumulator_constraints + aggregation_constraints
+        refresh_constraints = _refresh_constraint_count()
+        static_constraints = aggregation_constraints + refresh_constraints
+        constraint_count = accumulator_constraints + static_constraints
         if link is not None:
             constraint_count += 4
         if cache.constraint_count != constraint_count:
@@ -635,14 +714,12 @@ def build_statement(public: PublicParameters, prover: Any,
         if link is not None and constraint_filter is None:
             if (cache.accumulator_prefix_hash is None or
                     cache.accumulator_key != accumulator_key):
-                prefix_hash = (cache.aggregation_prefix_hash
-                               if aggregation_constraints else
-                               cache.static_hash)
+                prefix_hash = cache.aggregation_prefix_hash
                 if prefix_hash is None:
                     raise ValueError(
                         "q96 verifier accumulator prefix is unavailable")
                 error = lib.labrador38_py_statement_rebind_tail(
-                    ps.statement, aggregation_constraints,
+                    ps.statement, static_constraints,
                     accumulator_constraints,
                     ffi.new("int64_t[]", dynamic_rhs[
                         aggregation_rhs_count:
@@ -658,18 +735,17 @@ def build_statement(public: PublicParameters, prover: Any,
                 cache.accumulator_key = accumulator_key
             error = lib.labrador38_py_statement_rebind_tail(
                 ps.statement,
-                aggregation_constraints + accumulator_constraints, 4,
+                static_constraints + accumulator_constraints, 4,
                 ffi.new("int64_t[]", dynamic_rhs[
                     aggregation_rhs_count + accumulator_rhs_count:]),
                 ffi.new("uint8_t[16]", cache.accumulator_prefix_hash))
         else:
-            dynamic_hash = (cache.aggregation_prefix_hash
-                            if aggregation_constraints else cache.static_hash)
+            dynamic_hash = cache.aggregation_prefix_hash
             if dynamic_hash is None:
                 raise ValueError("q96 verifier transcript prefix is unavailable")
             error = lib.labrador38_py_statement_rebind_tail(
-                ps.statement, aggregation_constraints,
-                constraint_count - aggregation_constraints,
+                ps.statement, static_constraints,
+                constraint_count - static_constraints,
                 ffi.new("int64_t[]", dynamic_rhs[aggregation_rhs_count:]),
                 ffi.new("uint8_t[16]", dynamic_hash))
         if error != 0:
@@ -732,7 +808,8 @@ def build_statement(public: PublicParameters, prover: Any,
             linear_terms: list[Any], linear_witnesses: list[int],
             quadratic_coefficients: list[int],
             quadratic_left: list[int], quadratic_right: list[int],
-            rhs: list[int]) -> None:
+            rhs: list[int],
+            quadratic_exponents: list[int] | None = None) -> None:
         """Append one q96 relation without transient poly_t/polyvec_t trees.
 
         ``proof_statement.append_quadratic_statement`` first constructs one
@@ -753,6 +830,9 @@ def build_statement(public: PublicParameters, prover: Any,
         if not (len(quadratic_coefficients) == len(quadratic_left) ==
                 len(quadratic_right)):
             raise ValueError("q96 native quadratic term accounting mismatch")
+        if (quadratic_exponents is not None and
+                len(quadratic_exponents) != len(quadratic_coefficients)):
+            raise ValueError("q96 quadratic monomial accounting mismatch")
 
         lengths: list[int] = []
         flat_parts: list[Any] = []
@@ -792,14 +872,20 @@ def build_statement(public: PublicParameters, prover: Any,
             rhs_ptr = ffi.new("int64_t[]", rhs)
         append_started = time.perf_counter()
         native_quadratic_prepare_seconds += append_started - operation_started
-        error = ps.append_quadratic(
+        arguments = (
             ps.statement, len(linear_terms), len(quadratic_coefficients),
             ffi.new("size_t[]", mapped_linear),
             ffi.new("size_t[]", mapped_left),
             ffi.new("size_t[]", mapped_right),
             ffi.new("size_t[]", lengths), 1,
-            ffi.new("int64_t[]", quadratic_coefficients),
-            linear_ptr, rhs_ptr)
+            ffi.new("int64_t[]", quadratic_coefficients))
+        if quadratic_exponents is None:
+            error = ps.append_quadratic(
+                *arguments, linear_ptr, rhs_ptr)
+        else:
+            error = lib.labrador38_py_append_quadratic_monomials(
+                *arguments, ffi.new("uint32_t[]", quadratic_exponents),
+                linear_ptr, rhs_ptr)
         if error != 0:
             raise ValueError(f"q96 native accumulator constraint failed: {error}")
         native_quadratic_append_seconds += (
@@ -813,6 +899,53 @@ def build_statement(public: PublicParameters, prover: Any,
         for bit in range(HANDLE_BITS)]
     x_idx = [append_vector(handle_polys[start:end], binary=True)
              for start, end in handle_slices]
+    refresh_r_idx = append_vector([
+        [prover.refresh_r_bits[bit]] + [0] * (PHASE_N - 1)
+        for bit in range(REFRESH_BITS)
+    ], binary=True)
+    refresh_z_idx = [append_vector([
+        prover.witness_phase(REFRESH_Z_FIRST_SLOT + block, 0, phase)
+        for block in range(REFRESH_BLOCKS)
+    ], exact_norm_sq=REFRESH_BLOCKS * PHASE_N)
+        for phase in range(PHASES)]
+
+    stage_started = time.perf_counter()
+    if cache is not None and cache.refresh_bank is not None:
+        refresh_bank = cache.refresh_bank
+    else:
+        refresh_bank = _refresh_lane_phase_bank(public)
+        if cache is not None:
+            cache.refresh_bank = refresh_bank
+    refresh_raw = refresh_bank[0].copy()
+    selected_refresh = _np.flatnonzero(
+        _np.asarray(prover.refresh_r_bits, dtype=_np.int64))
+    if selected_refresh.size:
+        refresh_raw += _np.sum(
+            refresh_bank[selected_refresh + 1], axis=0, dtype=_np.int64)
+    refresh_ahat_idx: list[list[list[int]]] = []
+    refresh_lift_idx: list[list[int]] = []
+    refresh_lift_bound = (
+        REFRESH_BLOCKS * PHASE_N * (REFRESH_BITS + 1) ** 2)
+    for lane, modulus in enumerate(MODULI):
+        centered = refresh_raw[lane] % modulus
+        centered = _np.where(
+            centered > modulus // 2, centered - modulus, centered)
+        lane_chunks = _balanced_radix_limbs(centered, REFRESH_AHAT_LIMBS)
+        lane_ahat = []
+        lane_lifts = []
+        lane_lift_values = (refresh_raw[lane] - centered) // modulus
+        for phase in range(PHASES):
+            lane_ahat.append([
+                append_vector(lane_chunks[chunk][phase].tolist())
+                for chunk in range(REFRESH_AHAT_LIMBS)
+            ])
+            lane_lifts.append(append_vector(
+                lane_lift_values[phase].tolist(),
+                exact_norm_sq=refresh_lift_bound))
+        refresh_ahat_idx.append(lane_ahat)
+        refresh_lift_idx.append(lane_lifts)
+    _q96_timing("prepare Remark-4.3 refresh bank", stage_started)
+
     left_idx = [append_vector([
         prover.witness_phase(0, limb, phase) for phase in range(PHASES)
     ], accumulator_witness=True) for limb in range(WITNESS_LIMBS)]
@@ -828,7 +961,7 @@ def build_statement(public: PublicParameters, prover: Any,
             TAG_SLOT + 1 + bit * GADGET_DIGITS + digit, limb, phase)
         for bit in range(start, end)
     ], accumulator_witness=True,
-        approx_requirement=(PACK_APPROX_NORM_SQ_FLOOR //
+        approx_requirement=(_pack_approx_norm_sq_floor() //
                             len(handle_slices)))
         for start, end in handle_slices]
                   for phase in range(PHASES)]
@@ -903,8 +1036,12 @@ def build_statement(public: PublicParameters, prover: Any,
             exact_norm_sq=PHASE_N * (LINK_DECOMP_BASE // 2) ** 2)
             for limb in range(LINK_DECOMP_LIMBS)] for row in range(4)]
 
-    expected_backend_polys = (HANDLE_BITS +
-                              NON_TAG_POLYS * WITNESS_LIMBS * PHASES +
+    base_non_tag_polys = NON_TAG_POLYS - REFRESH_BLOCKS
+    expected_backend_polys = (HANDLE_BITS + REFRESH_BITS +
+                              base_non_tag_polys * WITNESS_LIMBS * PHASES +
+                              REFRESH_BLOCKS * PHASES +
+                              LANES * PHASES * REFRESH_BLOCKS *
+                              (REFRESH_AHAT_LIMBS + 1) +
                               LANES * LIFT_LIMBS * PHASES)
     if aggregate_idx is not None:
         expected_backend_polys += (
@@ -923,7 +1060,9 @@ def build_statement(public: PublicParameters, prover: Any,
                                else LANES * PHASES)
     aggregation_constraints = _aggregation_constraint_count(
         accumulator_constraints)
-    constraint_count = accumulator_constraints + aggregation_constraints
+    refresh_constraints = _refresh_constraint_count()
+    static_constraints = aggregation_constraints + refresh_constraints
+    constraint_count = accumulator_constraints + static_constraints
     if link is not None:
         constraint_count += 4
     cache_hit = cache is not None and cache.ps is not None
@@ -948,6 +1087,8 @@ def build_statement(public: PublicParameters, prover: Any,
                                    else LANES * PHASES)
         aggregation_constraints = _aggregation_constraint_count(
             accumulator_constraints)
+        refresh_constraints = _refresh_constraint_count()
+        static_constraints = aggregation_constraints + refresh_constraints
         aggregation_rhs_count = 0
         accumulator_rhs_count = accumulator_constraints * PHASE_N
         accumulator_key = tuple(int(value) for value in prover.accumulator)
@@ -955,14 +1096,12 @@ def build_statement(public: PublicParameters, prover: Any,
         if can_split:
             if (cache.accumulator_prefix_hash is None or
                     cache.accumulator_key != accumulator_key):
-                prefix_hash = (cache.aggregation_prefix_hash
-                               if aggregation_constraints else
-                               cache.static_hash)
+                prefix_hash = cache.aggregation_prefix_hash
                 if prefix_hash is None:
                     raise ValueError(
                         "q96 aggregation transcript prefix is unavailable")
                 error = lib.labrador38_py_statement_rebind_tail(
-                    ps.statement, aggregation_constraints,
+                    ps.statement, static_constraints,
                     accumulator_constraints,
                     ffi.new("int64_t[]",
                             dynamic_rhs[
@@ -970,7 +1109,7 @@ def build_statement(public: PublicParameters, prover: Any,
                                 aggregation_rhs_count + accumulator_rhs_count]),
                     ffi.new("uint8_t[16]", prefix_hash))
                 if error != 0:
-                    if aggregation_constraints:
+                    if static_constraints:
                         raise ValueError(
                             "q96 accumulator-prefix rebind extension is "
                             f"unavailable: {error}")
@@ -1003,7 +1142,7 @@ def build_statement(public: PublicParameters, prover: Any,
             if error is not None:
                 error = lib.labrador38_py_statement_rebind_tail(
                     ps.statement,
-                    aggregation_constraints + accumulator_constraints, 4,
+                    static_constraints + accumulator_constraints, 4,
                     ffi.new("int64_t[]", dynamic_rhs[
                         aggregation_rhs_count + accumulator_rhs_count:]),
                     ffi.new("uint8_t[16]", cache.accumulator_prefix_hash))
@@ -1012,10 +1151,9 @@ def build_statement(public: PublicParameters, prover: Any,
                         f"q96 same-handle tail RHS rebind failed: {error}")
                 _q96_timing("rebind same-handle RHS tail", stage_started)
         else:
-            dynamic_first = aggregation_constraints
-            dynamic_count = constraint_count - aggregation_constraints
-            dynamic_hash = (cache.aggregation_prefix_hash
-                            if aggregation_constraints else cache.static_hash)
+            dynamic_first = static_constraints
+            dynamic_count = constraint_count - static_constraints
+            dynamic_hash = cache.aggregation_prefix_hash
             if dynamic_hash is None:
                 raise ValueError(
                     "q96 dynamic transcript prefix is unavailable")
@@ -1047,7 +1185,7 @@ def build_statement(public: PublicParameters, prover: Any,
     ps = proof_statement(
         [PHASE_N] * len(vectors), dimensions, norms,
         num_constraints=constraint_count, primesize="38",
-        num_deg0_constraints=HANDLE_BITS, zk=True,
+        num_deg0_constraints=HANDLE_BITS + REFRESH_BITS, zk=True,
         approx_norm_list=approx_norm_list)
     _q96_timing("allocate cold proof_statement", stage_started)
     stage_started = time.perf_counter()
@@ -1062,11 +1200,41 @@ def build_statement(public: PublicParameters, prover: Any,
             raise ValueError(
                 f"q96 compact handle degree-0 constraints failed: {error}")
         ps.cur_deg0_constraint_num += end - start
+    error = lib.labrador38_py_append_deg0_vector_constraints(
+        ps.statement, ps.map[refresh_r_idx], REFRESH_BITS)
+    if error != 0:
+        raise ValueError(f"q88 refresh-r degree-0 constraints failed: {error}")
+    ps.cur_deg0_constraint_num += REFRESH_BITS
+    _q96_timing("append degree-0 handle/refresh constraints", stage_started)
+
+    stage_started = time.perf_counter()
+    refresh_bank_i32 = _np.ascontiguousarray(refresh_bank, dtype=_np.int32)
+    refresh_chunk_indices = [
+        ps.map[refresh_ahat_idx[lane][phase][chunk]]
+        for lane in range(LANES)
+        for phase in range(PHASES)
+        for chunk in range(REFRESH_AHAT_LIMBS)
+    ]
+    refresh_lift_indices = [
+        ps.map[refresh_lift_idx[lane][phase]]
+        for lane in range(LANES)
+        for phase in range(PHASES)
+    ]
+    error = lib.labrador38_py_append_refresh_phase_constraints(
+        ps.statement, ps.map[refresh_r_idx],
+        ffi.new("size_t[]", refresh_chunk_indices),
+        ffi.new("size_t[]", refresh_lift_indices),
+        ffi.from_buffer("int32_t[]", refresh_bank_i32), REFRESH_BITS,
+        REFRESH_BLOCKS, LANES, PHASES, PHASE_N,
+        ffi.new("uint32_t[]", MODULI), LIMB_RADIX, REFRESH_AHAT_LIMBS)
+    if error != 0:
+        raise ValueError(f"q88 sparse A_r selection constraints failed: {error}")
+    ps.cur_constraint_num += refresh_constraints
     if cache is not None:
         static_hash = ffi.new("uint8_t[16]")
         lib.labrador38_py_statement_hash(static_hash, ps.statement)
         cache.static_hash = bytes(ffi.buffer(static_hash, 16))
-    _q96_timing("append degree-0 handle constraints", stage_started)
+    _q96_timing("append A_r selection constraints", stage_started)
 
     if aggregate_idx is not None:
         stage_started = time.perf_counter()
@@ -1135,6 +1303,8 @@ def build_statement(public: PublicParameters, prover: Any,
                 ffi.buffer(aggregation_hash, 16))
         _q96_timing(
             "append rank-(16+8) aggregate constraints", stage_started)
+    elif cache is not None:
+        cache.aggregation_prefix_hash = cache.static_hash
 
     if compact_hash:
         # The profile binds the canonical q88 PP, q19 matrix context and the
@@ -1144,7 +1314,7 @@ def build_statement(public: PublicParameters, prover: Any,
         # constraint order using the established canonical polynomial bytes.
         assert cache is not None and cache.profile_id is not None
         semantic_prefix = hashlib.shake_256(
-            b"REVAC-Q88-LABRADOR38-STATEMENT-HASH-V1\x00" +
+            b"REVAC-Q88-LABRADOR38-STATEMENT-HASH-V2-REFRESH128\x00" +
             cache.profile_id
         ).digest(16)
         lib.labrador38_py_statement_hash_reset(
@@ -1339,6 +1509,7 @@ def build_statement(public: PublicParameters, prover: Any,
             stat_quad = []
             wit_quad1 = []
             wit_quad2 = []
+            quad_exponents = []
             if not fold_handle_for_debug:
                 if aggregate_idx is not None:
                     for limb in range(AGGREGATE_LIMBS):
@@ -1348,6 +1519,7 @@ def build_statement(public: PublicParameters, prover: Any,
                             wit_quad1.append(x_idx[chunk])
                             wit_quad2.append(
                                 aggregate_idx[lane][output_phase][limb][chunk])
+                            quad_exponents.append(0)
                 else:
                     gadget_scale = 1
                     for digit in range(GADGET_DIGITS):
@@ -1358,7 +1530,16 @@ def build_statement(public: PublicParameters, prover: Any,
                             wit_quad1.append(x_idx[0])
                             wit_quad2.append(
                                 right_idx[digit][limb][output_phase][0])
+                            quad_exponents.append(0)
                         gadget_scale *= GADGET_BASE
+            for chunk in range(REFRESH_AHAT_LIMBS):
+                for z_phase in range(PHASES):
+                    ahat_phase = (output_phase - z_phase) % PHASES
+                    stat_quad.append(_proof_center(LIMB_RADIX ** chunk))
+                    wit_quad1.append(
+                        refresh_ahat_idx[lane][ahat_phase][chunk])
+                    wit_quad2.append(refresh_z_idx[z_phase])
+                    quad_exponents.append(1 if z_phase > output_phase else 0)
             rhs = [
                 _proof_center(_center_lane(
                     prover.accumulator[PHASES * coefficient + output_phase],
@@ -1372,7 +1553,8 @@ def build_statement(public: PublicParameters, prover: Any,
                 # an otherwise redundant full re-hash of all public matrices.
                 rhs = [0] * PHASE_N
             append_native_quadratic(
-                stat_lin, wit_lin, stat_quad, wit_quad1, wit_quad2, rhs)
+                stat_lin, wit_lin, stat_quad, wit_quad1, wit_quad2, rhs,
+                quad_exponents)
     if phase_executor is not None:
         phase_executor.shutdown(wait=True)
     _q96_timing("append accumulator constraints (native flat)", stage_started)
@@ -1440,11 +1622,9 @@ def build_statement(public: PublicParameters, prover: Any,
         # RHS before entering Prove/Verify.
         dynamic_rhs_values = _dynamic_rhs(
             prover, link, constraint_filter)
-        dynamic_first = aggregation_constraints
-        dynamic_count = constraint_count - aggregation_constraints
-        dynamic_prefix_hash = (cache.aggregation_prefix_hash
-                               if aggregation_constraints else
-                               cache.static_hash)
+        dynamic_first = static_constraints
+        dynamic_count = constraint_count - static_constraints
+        dynamic_prefix_hash = cache.aggregation_prefix_hash
         if dynamic_prefix_hash is None:
             raise ValueError("q96 canonical transcript prefix is unavailable")
         assert cache.static_hash is not None
@@ -1463,7 +1643,7 @@ def build_statement(public: PublicParameters, prover: Any,
         if link is not None and constraint_filter is None:
             accumulator_rhs_count = accumulator_constraints * PHASE_N
             error = lib.labrador38_py_statement_rebind_tail(
-                ps.statement, aggregation_constraints,
+                ps.statement, static_constraints,
                 accumulator_constraints,
                 ffi.new("int64_t[]",
                         dynamic_rhs_values[:accumulator_rhs_count]),
@@ -1479,7 +1659,7 @@ def build_statement(public: PublicParameters, prover: Any,
                 int(value) for value in prover.accumulator)
             error = lib.labrador38_py_statement_rebind_tail(
                 ps.statement,
-                aggregation_constraints + accumulator_constraints, 4,
+                static_constraints + accumulator_constraints, 4,
                 ffi.new("int64_t[]",
                         dynamic_rhs_values[accumulator_rhs_count:]),
                 ffi.new("uint8_t[16]", cache.accumulator_prefix_hash))

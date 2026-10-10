@@ -113,6 +113,12 @@ static void revac_uav_memver_q96_cache_key(
           &state, &uav->acc96_witness->right.right[bit][digit]);
     }
   }
+  shake256_absorb(&state, uav->acc96_witness->refresh_r,
+                  sizeof(uav->acc96_witness->refresh_r));
+  for (size_t block = 0; block < ACC96_REFRESH_BLOCKS; block++) {
+    revac_uav_memver_absorb_acc96_poly(
+        &state, &uav->acc96_witness->refresh_z[block]);
+  }
   shake256_finalize(&state);
   shake256_squeeze(out, REVAC_CONTEXT_HASH_BYTES, &state);
 }
@@ -1084,7 +1090,8 @@ int revac_uav_show_prove(revac_show_proof_t *proof,
     if (!revac_public_accumulator_digest(acc_digest, public_state)) return 0;
     revac_show_derive_crs_seed(crs_seed, public_state->ta_pk, uav->pk.seed,
                                proof->nonce, public_state->acc_profile,
-                               public_state->acc_seq, acc_digest);
+                               public_state->acc_seq, public_state->window_id,
+                               public_state->parameter_digest, acc_digest);
   }
 
   poly_qshow_vec_m1_init(s1);

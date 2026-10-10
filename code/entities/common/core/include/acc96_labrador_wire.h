@@ -6,8 +6,8 @@
 
 #include "acc96_exact_lift.h"
 
-#define ACC96_LABRADOR_PUBLIC_MAGIC "RV88PP02"
-#define ACC96_LABRADOR_PROVER_MAGIC "RV88PV02"
+#define ACC96_LABRADOR_PUBLIC_MAGIC "RV88PP03"
+#define ACC96_LABRADOR_PROVER_MAGIC "RV88PV04"
 #define ACC96_LABRADOR_MAGIC_BYTES 8U
 
 /* Static verifier/prover artifact.  A, Ba and ua are expanded from seed;
@@ -18,16 +18,18 @@
 
 /* Local-only prover payload.  The tag is omitted because the relation fixes
  * it to the constant polynomial one.  All signed witness/lift coefficients
- * are emitted as little-endian int32 limbs ready for native LaBRADOR slots.
+ * are emitted as little-endian int16 limbs ready for native LaBRADOR slots.
+ * The encoder checks the decomposition bound before narrowing.
  * Each limb is ordered phase-major under X^i -> X^(16k+r), not as 16
  * contiguous source chunks. */
 #define ACC96_LABRADOR_WITNESS_LIMB_BYTES \
-  (ACC96_PROOF_NON_TAG_POLYS * ACC96_WINDOW_PROOF_LIMBS * ACC96_N * 4U)
+  (ACC96_PROOF_NON_TAG_POLYS * ACC96_WINDOW_PROOF_LIMBS * ACC96_N * 2U)
 #define ACC96_LABRADOR_LIFT_LIMB_BYTES \
-  (ACC96_LIMBS * ACC96_LIFT_PROOF_LIMBS * ACC96_N * 4U)
+  (ACC96_LIMBS * ACC96_LIFT_PROOF_LIMBS * ACC96_N * 2U)
 #define ACC96_LABRADOR_PROVER_BYTES \
   (ACC96_LABRADOR_MAGIC_BYTES + 2U * 4U + ACC96_POLY_PACKED_BYTES + \
-   ACC96_HANDLE_BITS + ACC96_LABRADOR_WITNESS_LIMB_BYTES + \
+   ACC96_HANDLE_BITS + ACC96_REFRESH_BYTES + \
+   ACC96_LABRADOR_WITNESS_LIMB_BYTES + \
    ACC96_LABRADOR_LIFT_LIMB_BYTES)
 
 

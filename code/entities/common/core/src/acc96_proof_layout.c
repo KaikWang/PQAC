@@ -15,6 +15,8 @@ const acc96_poly_t *acc96_proof_witness_poly_at(
   if (slot >= ACC96_PROOF_SLOT_V2_FIRST && slot < ACC96_PROOF_SLOT_TAG)
     return &witness->v2[slot - ACC96_PROOF_SLOT_V2_FIRST];
   if (slot == ACC96_PROOF_SLOT_TAG) return &witness->tag;
+  if (slot >= ACC96_PROOF_SLOT_REFRESH_Z_FIRST)
+    return &witness->refresh_z[slot - ACC96_PROOF_SLOT_REFRESH_Z_FIRST];
   slot -= ACC96_PROOF_SLOT_RIGHT_FIRST;
   return &witness->right.right[slot / ACC96_GADGET_DIGITS]
                                 [slot % ACC96_GADGET_DIGITS];
@@ -28,6 +30,8 @@ acc96_poly_t *acc96_proof_witness_poly_at_mut(
   if (slot >= ACC96_PROOF_SLOT_V2_FIRST && slot < ACC96_PROOF_SLOT_TAG)
     return &witness->v2[slot - ACC96_PROOF_SLOT_V2_FIRST];
   if (slot == ACC96_PROOF_SLOT_TAG) return &witness->tag;
+  if (slot >= ACC96_PROOF_SLOT_REFRESH_Z_FIRST)
+    return &witness->refresh_z[slot - ACC96_PROOF_SLOT_REFRESH_Z_FIRST];
   slot -= ACC96_PROOF_SLOT_RIGHT_FIRST;
   return &witness->right.right[slot / ACC96_GADGET_DIGITS]
                                 [slot % ACC96_GADGET_DIGITS];
@@ -235,6 +239,8 @@ int acc96_window_proof_witness_check(
     for (size_t digit = 0; digit < ACC96_GADGET_DIGITS; digit++)
       valid &= window_check_poly(&witness->right.right[bit][digit], ctx,
                                  &maximum);
+  for (size_t block = 0; block < ACC96_REFRESH_BLOCKS; block++)
+    valid &= window_check_poly(&witness->refresh_z[block], ctx, &maximum);
   if (max_abs != NULL) *max_abs = maximum;
   return valid;
 }

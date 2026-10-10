@@ -1,0 +1,85 @@
+diff --git a/labrados_python.h b/labrados_python.h
+--- a/labrados_python.h
++++ b/labrados_python.h
+@@ -73,5 +73,10 @@ __attribute__((visibility("default")))
+ int py_append_deg0_vector_constraints(statement st, size_t idx, size_t count);
+ 
++#define py_append_deg0_logical_vector_constraints NAMESPACE(py_append_deg0_logical_vector_constraints)
++__attribute__((visibility("default")))
++int py_append_deg0_logical_vector_constraints(statement st, size_t idx,
++                                               size_t count, size_t deg);
++
+ #define py_seeded_uniform_matrix_bank NAMESPACE(py_seeded_uniform_matrix_bank)
+ __attribute__((visibility("default")))
+ int py_seeded_uniform_matrix_bank(int32_t *out, const uint8_t seed[32],
+diff --git a/labrados_python.c b/labrados_python.c
+--- a/labrados_python.c
++++ b/labrados_python.c
+@@ -912,6 +912,37 @@ int py_append_deg0_vector_constraints(
+   return 0;
+ }
+ 
++/* Add one degree-zero predicate for every logical extension-ring polynomial.
++ * Each logical polynomial occupies `deg` consecutive base-ring polynomials in
++ * the witness.  This is the vector analogue of py_append_deg0_constraint(). */
++int py_append_deg0_logical_vector_constraints(
++  statement st,
++  size_t idx,
++  size_t count,
++  size_t deg
++)
++{
++  size_t i, off;
++  intcnst *cnst;
++
++  if(idx >= st->r || count == 0 || deg == 0 ||
++     count > SIZE_MAX / deg || st->n[idx] != count * deg){
++    fprintf(stderr, "ERROR in py_append_deg0_logical_vector_constraints(): "
++                    "invalid witness vector, count, or degree\n");
++    return 1;
++  }
++
++  off = 0;
++  for(i=0;i<idx;i++) off += st->n[i];
++  for(i=0;i<count;i++){
++    cnst = &st->zqcnst->intc[st->zqcnst->nint++];
++    (*cnst)->off = off + i * deg;
++    (*cnst)->rank = deg;
++    st->zqcnst->int_nchal += deg * N - 1;
++  }
++  return 0;
++}
++
+ /* Deterministically expand a seed-defined matrix bank into an int32 buffer.
+  * This is a bridge primitive: it mirrors the application's SHAKE256 block
+  * derivation and SHAKE128 q-uniform rejection sampler, while avoiding tens of
+@@ -1474,9 +1505,8 @@ int py_statement_rebind_tail(
+   const uint8_t static_hash[16]
+ )
+ {
+-  size_t i;
++  size_t i, rhs_off = 0;
+   double width_unif = ldexp(1, 2*LOGQ);
+-  polz value;
+ 
+   /* ``tail`` historically required the rebound interval to end at the final
+    * sparse constraint.  Also accepting a proper prefix is useful to cache an
+@@ -1488,11 +1518,14 @@ int py_statement_rebind_tail(
+   memcpy(st->h, static_hash, sizeof(st->h));
+   for(i=0;i<count;i++){
+     sparsecnst *cnst = &st->rqcnst->sparse[first+i];
+-    if((*cnst)->b->len != 1) return 2;
+-    polzvec_fromint64vec(&value, 1, 1, rhs + i*N);
+-    polzvec_topolxvec((*cnst)->b, &value, 0, 1, 1);
+-    polxvec_setwidths1((*cnst)->b, 0, 1, 1, width_unif);
++    const size_t rank = (*cnst)->b->len;
++    polz values[rank];
++    if(rank == 0 || rhs_off > SIZE_MAX - rank * N) return 2;
++    polzvec_fromint64vec(values, 1, rank, rhs + rhs_off);
++    polzvec_topolxvec((*cnst)->b, values, 0, 1, rank);
++    polxvec_setwidths1((*cnst)->b, 0, 1, rank, width_unif);
+     py_hash_existing_sparse(st, *cnst);
++    rhs_off += rank * N;
+   }
+   return 0;
+ }

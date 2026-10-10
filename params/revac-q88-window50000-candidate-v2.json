@@ -1,5 +1,5 @@
 {
-  "profile": "revac-q88-window10000-candidate-v1",
+  "profile": "revac-q88-window50000-candidate-v2",
   "status": "implemented-candidate",
   "accumulator": {
     "ring_degree": 4096,
@@ -25,28 +25,30 @@
     }
   },
   "window": {
-    "runtime_deletion_limit": 10000,
+    "runtime_deletion_limit": 50000,
     "conditional_arithmetic_limit_beta1_lt_q": 56245,
-    "beta0_log2_at_10000": 74.45794772219865,
-    "beta1_log2_at_10000": 85.50755069848967,
-    "log2_q_over_beta1_at_10000": 2.49174477624301,
-    "public_witness_norm_sq_bound_log2": 148,
-    "note": "The 56245 value is an arithmetic beta1<q screen, not a complete standalone security proof. The runtime window remains 10000."
+    "beta0_log2_at_50000": 76.77987581708601,
+    "beta1_log2_at_50000": 87.82947879337704,
+    "log2_q_over_beta1_at_50000": 0.1698166813556412,
+    "public_witness_norm_sq_bound_log2": 153,
+    "note": "The 56245 value is an arithmetic beta1<q screen, not a complete standalone security proof. The runtime window is 50000 and leaves only 0.170 bits of arithmetic margin."
   },
   "proof_layout": {
-    "witness_polynomials_including_fixed_tag": 169,
-    "transmitted_non_tag_polynomials": 168,
+    "witness_polynomials_including_fixed_tag": 175,
+    "transmitted_non_tag_polynomials": 174,
+    "refresh_bits": 128,
+    "refresh_z_polynomials": 6,
     "witness_radix": 8191,
     "witness_limbs": 5,
     "exact_lift_limbs": 7,
-    "wire_version": "RV88-v1"
+    "wire_version": "RV88-v3"
   },
   "size_projection": {
     "accumulator_kib": 44.0,
-    "transmitted_full_witness_mib": 7.21875,
+    "transmitted_full_witness_mib": 7.4765625,
     "ba_mib": 6.1875,
     "delta4_single_worst_case_kib": 516.0,
-    "delta4_accumulated_10000_worst_case_kib": 684.0,
+    "delta4_accumulated_50000_worst_case_kib": 708.0,
     "note": "These are canonical/compact representation projections for candidate comparison, not sizeof(C structs)."
   },
   "compatibility": {
