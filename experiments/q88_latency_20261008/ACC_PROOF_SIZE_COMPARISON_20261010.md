@@ -210,3 +210,8 @@ of the following and passes both clear and Pack verification:
 Any proof that substitutes effective public handle/refresh coefficients, drops
 one lane, or omits the link relation is an audit prototype only and must not be
 compared with the 193.75/193.78 KiB production envelopes.
+
+The isolated worker dump also measured the complete serialized production
+q88 envelope directly: **198882 bytes = 194.220703 KiB**.  Pack Verify passed;
+prove was 4.673 s and verify was 2.466 s.  This byte count is the exact
+serialized baseline for the next full bridge proof.
