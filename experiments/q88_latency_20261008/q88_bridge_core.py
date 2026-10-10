@@ -341,3 +341,71 @@ def verify_auxiliary_equality(actual: Sequence[int], expected: Sequence[int],
     if len(actual) != len(expected) or any(x != y for x, y in zip(actual,
                                                                   expected)):
         raise ValueError(f"q88 auxiliary witness mismatch: {label}")
+
+@dataclass(frozen=True)
+class DigitBinding:
+    base: int
+    input_digits: tuple[tuple[tuple[int, ...], ...], ...]
+    output_digits: tuple[tuple[int, ...], ...]
+    carries: tuple[tuple[int, ...], ...]
+
+    def verify(self) -> None:
+        if not self.output_digits:
+            raise ValueError("empty digit binding")
+        degree = len(self.output_digits[0])
+        previous = [0] * degree
+        for layer, output in enumerate(self.output_digits):
+            expression = previous[:]
+            for digits in self.input_digits:
+                if layer < len(digits):
+                    expression = [x + y for x, y in zip(expression,
+                                                         digits[layer])]
+            if layer:
+                expression = [x - y for x, y in zip(expression,
+                                                     self.output_digits[layer-1])]
+            expression = [x - self.base * y for x, y in
+                          zip(expression, self.carries[layer])]
+            if expression != [0] * degree:
+                raise ValueError(f"digit binding layer {layer} failed")
+            previous = list(self.carries[layer])
+
+
+def compile_digit_binding(inputs: Sequence[Sequence[int]],
+                          scalars: Sequence[int], target: Sequence[int], *,
+                          base: int = 128, digits: int = 12) -> DigitBinding:
+    """Compile exact scalar-combination binding with radix carries."""
+    if len(inputs) != len(scalars) or len(target) != len(inputs[0]):
+        raise ValueError("digit binding shape mismatch")
+    degree = len(target)
+    total = [0] * degree
+    for poly, scalar in zip(inputs, scalars):
+        total = [x + int(scalar) * y for x, y in zip(total, poly)]
+    if any(abs(value) >= (base ** digits) // 2 for value in total):
+        raise ValueError("digit binding capacity exhausted")
+    input_digits = []
+    for poly, scalar in zip(inputs, scalars):
+        layers = []
+        for layer in range(digits):
+            layers.append([((int(scalar) * int(value) + base // 2) % base)
+                           - base // 2 for value in poly])
+        input_digits.append(tuple(tuple(layer) for layer in layers))
+    output_digits = tuple(tuple(_digit for _digit in layer) for layer in
+                          zip(*[_balanced for _balanced in []])) if False else tuple(
+        tuple(layer) for layer in _decompose(target, base, digits, signed=True))
+    carries = []
+    previous = [0] * degree
+    for layer in range(digits):
+        expression = previous[:]
+        for item in input_digits:
+            expression = [x + y for x, y in zip(expression, item[layer])]
+        expression = [x - y for x, y in zip(expression, output_digits[layer])]
+        if any(value % base for value in expression):
+            raise ValueError("digit binding carry is not integral")
+        previous = [value // base for value in expression]
+        carries.append(previous)
+    if any(previous):
+        raise ValueError("digit binding terminal carry is nonzero")
+    result = DigitBinding(base, tuple(input_digits), output_digits,
+                          tuple(tuple(layer) for layer in carries))
+    result.verify()
+    return result
