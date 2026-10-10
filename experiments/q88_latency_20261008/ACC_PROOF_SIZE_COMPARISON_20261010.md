@@ -172,3 +172,19 @@ lower-bound reference for the adapter and must not be reported as the q88
 result.  The remaining integration work is to feed the 174 q88 witness columns
 plus the bound handle/refresh auxiliary equations into the same native
 statement, then rerun this exact serialization measurement.
+
+## 2026-10-10: refreshed complete q88 baseline
+
+The complete production q88 path was rerun on `autodl-pqac8` with one show:
+
+```text
+accumulator proof envelope: 194.53 KiB
+complete show packet: 213.56 KiB
+prove: 4.960 s
+verify: 2.607 s
+```
+
+This is the comparison baseline for the full bridge.  The earlier 193.78 KiB
+value is a lower sample from the same profile; proof framing is challenge and
+parameter dependent, so the comparison must use the same serialized envelope
+format and repeated-show protocol.
