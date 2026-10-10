@@ -16,6 +16,7 @@ import argparse
 import contextlib
 import hashlib
 import os
+import pathlib
 import signal
 import socket
 import struct
@@ -385,6 +386,10 @@ def prove(dynamic: bytes, entry: dict[str, Any],
     proof_bytes = serialize_labrador38_proof(
         params, proof, require_zk=True,
         compact_profile_id=request_profile_id)
+    proof_dump = os.environ.get("REVAC_Q96_EXPERIMENT_PROOF_DUMP")
+    if proof_dump:
+        # Isolated experiment only: dump the complete serialized envelope.
+        pathlib.Path(proof_dump).write_bytes(proof_bytes)
     print(f"[q96 worker timing] compact proof serialization: "
           f"{time.perf_counter() - stage_started:.6f} s", flush=True)
     # The resident cache owns only ps and params.  Every returned proof is a
