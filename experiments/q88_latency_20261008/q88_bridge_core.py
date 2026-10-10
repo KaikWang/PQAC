@@ -630,5 +630,21 @@ def compile_linear_crt_bridge_fast(matrix, witness, target, *,
         carries.append(previous)
     if any(previous):
         raise ValueError("q88 fast bridge terminal carry is nonzero")
-    bridge = Bridge(degree, base, h, w, q_digits, q_layers, t, carries, {})
+    bridge = FastBridge(degree, base, h, w, q_digits, q_layers, t, carries, {})
     return bridge
+
+
+@dataclass
+class FastBridge:
+    degree: int
+    base: int
+    h_digits: list
+    w_digits: list
+    q_digits: list
+    quotient_digits: list
+    target_digits: list
+    carry_digits: list
+    bounds: dict
+
+    def equation_count(self):
+        return len(self.carry_digits)
