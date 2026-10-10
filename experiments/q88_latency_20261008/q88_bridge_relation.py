@@ -317,3 +317,62 @@ def require_safe_bridge_manifest(manifest: FullQ88BridgeManifest) -> None:
         raise ValueError("q88 bridge handle binding is incomplete")
     if manifest.refresh_binding_equations < REFRESH_BITS:
         raise ValueError("q88 bridge refresh binding is incomplete")
+
+@dataclass(frozen=True)
+class SafeMainRelation:
+    lane_matrix: tuple[tuple[tuple[int, ...], ...], ...]
+    witness: tuple[tuple[int, ...], ...]
+    target: tuple[tuple[int, ...], ...]
+    witness_slots: tuple[int, ...]
+
+
+def build_safe_main_relation(public: Any, prover: Any,
+                             relation: EffectiveLaneRelation,
+                             handle_product: Sequence[int],
+                             refresh_product: Sequence[Sequence[int]]) -> SafeMainRelation:
+    """Build the accumulator main equation without hidden effective coefficients."""
+    degree = len(relation.witness[0])
+    if len(handle_product) != degree or len(refresh_product) != 3:
+        raise ValueError("q88 safe main auxiliary shape mismatch")
+    if any(len(poly) != REFRESH_BLOCKS for poly in refresh_product):
+        raise ValueError("q88 safe refresh product block mismatch")
+    witness_slots = list(relation.witness_slots)
+    # Aggregate and product witnesses are appended after the wire witnesses.
+    aggregate_slot = max(witness_slots) + 1
+    product_slots = tuple(aggregate_slot + 1 + lane * REFRESH_BLOCKS + block
+                          for lane in range(3)
+                          for block in range(REFRESH_BLOCKS))
+    common_witness = list(relation.witness) + [tuple(handle_product)]
+    common_witness.extend(tuple(refresh_product[0][block])
+                          for block in range(REFRESH_BLOCKS))
+    # Products are mathematically common integer witnesses.  Lane copies are
+    # indexed separately in the native statement when their public residues
+    # are constrained.
+    common_witness.extend(tuple(refresh_product[1][block])
+                          for block in range(REFRESH_BLOCKS))
+    common_witness.extend(tuple(refresh_product[2][block])
+                          for block in range(REFRESH_BLOCKS))
+    columns_by_lane = []
+    for lane in range(3):
+        columns = [list(relation.lane_matrix[lane][0]),
+                   list(relation.lane_matrix[lane][1])]
+        columns.extend(list(column) for column in relation.lane_matrix[lane][2:2 + TRUNC_RIGHT])
+        # Public B columns only; hidden handle contribution is the separate
+        # aggregate witness with coefficient -1 below.
+        right_start = 2 + TRUNC_RIGHT
+        for index in range(HANDLE_BITS * GADGET_DIGITS):
+            bit, digit = divmod(index, GADGET_DIGITS)
+            columns.append([_center_lane(value, lane)
+                            for value in public.ba(bit, digit)])
+        one = [0] * degree
+        one[0] = -1
+        columns.append(one)
+        for block in range(REFRESH_BLOCKS):
+            one = [0] * degree
+            one[0] = 1
+            columns.append(one)
+        columns_by_lane.append(tuple(tuple(column) for column in columns))
+    safe_slots = tuple(witness_slots) + (aggregate_slot,) + product_slots
+    targets = relation.target
+    return SafeMainRelation(tuple(columns_by_lane), tuple(common_witness),
+                            targets, safe_slots)
