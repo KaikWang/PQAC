@@ -217,7 +217,10 @@ def build_auxiliary_product_witnesses(public: Any, prover: Any,
     polynomials and prove their binding equations; it may not substitute the
     effective coefficients from ``build_effective_lane_relation``.
     """
-    from q88_bridge_core import aggregate_handle_witness, negacyclic_mul
+    try:
+        from .q88_bridge_core import aggregate_handle_witness, negacyclic_mul
+    except ImportError:
+        from q88_bridge_core import aggregate_handle_witness, negacyclic_mul
 
     degree = len(relation.witness[0])
     right_offset = 2 + TRUNC_RIGHT
