@@ -3767,8 +3767,12 @@ __lnp_hash_statement_arp (__lnp_state_t state)
   const unsigned int m1 = tbox->m1 - Z;
   const unsigned int l = tbox->l;
   const unsigned int nprime = params->nprime;
+  /* Promote before multiplying.  The old expression performed the first
+   * products as 32-bit unsigned arithmetic, so a large full-ring statement
+   * wrapped to a short hash buffer and corrupted the prover state. */
   const size_t buflen
-      = CEIL ((m1 * nprime + l * nprime + nprime) * d * log2q, 8) + 1;
+      = CEIL (((size_t)m1 * nprime + (size_t)l * nprime + nprime) *
+              (size_t)d * log2q, 8) + 1;
   shake128_state_t hstate;
   coder_state_t cstate;
   size_t len;

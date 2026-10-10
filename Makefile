@@ -6,7 +6,7 @@ CFLAGS_DEBUG = $(CFLAGS_WARN) -Og -ggdb3
 ADD_CPPFLAGS = -DNDEBUG
 
 CPPFLAGS += $(ADD_CPPFLAGS)
-LIBS = -lm $(HEXL_DIR)/build/hexl/lib64/libhexl.a -lstdc++
+LIBS = -lm $(HEXL_DIR)/build/hexl/lib/libhexl.a -lstdc++
 
 # honor user CFLAGS
 ifdef CFLAGS
@@ -524,4 +524,3 @@ clean:
 	cd $(THIRD_PARTY_DIR) && rm -rf $(FALCON_SUBDIR)
 	cd $(THIRD_PARTY_DIR) && rm -rf $(HEXL_SUBDIR)
 	cd tests && rm -f *.o *.dSYM && cd .. && rm -f $(TESTS) && rm -f sage-test.sage.py
-
