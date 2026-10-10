@@ -136,7 +136,7 @@ class proof_statement:
             assert all(norm_list[x] != 0 for (x,_) in approx_norm_list)
             assert all(y > 0 for (_,y) in approx_norm_list)
 
-        print("initializing")
+        print("正在初始化 Labrador proof_statement")
         self.cur_witness_num=0
         self.cur_constraint_num=0
         self.cur_int_constraint_num=0
@@ -222,7 +222,7 @@ class proof_statement:
             self.params (C type): the parameters
             self.proof (C type): the proof
         """
-        print("Trying to Pack Prove")
+        print("正在执行 Pack Prove")
         if self.proven:
             self.free_params(self.params)
             self.free_proof(self.proof)
@@ -289,7 +289,7 @@ class proof_statement:
         # witness coefficients should all be < 16 bits, make sure they're centered
         self.cur_witness_num+=1
         return self.cur_witness_num-1
-    
+
     def append_statement(self,stat_list,witnum_list,right_pol:poly_t):
         """ Adds a linear statement to the proof system.
 
@@ -529,14 +529,14 @@ def pack_verify(proof,statement,primesize: str):
     
     """
     params,proof = proof[0],proof[1]
-    print("Trying to Pack Verify")
+    print("正在执行 Pack Verify")
     if primesize == "32":
         out=lib.labrador32_py_verify(statement,params,proof)
     elif primesize == "36":
         out=lib.labrador36_py_verify(statement,params,proof)
     elif primesize == "38":
         out=lib.labrador38_py_verify(statement,params,proof)
-    print("Pack Verify =",out==1)
+    print("Pack Verify 结果：", "通过" if out == 1 else "失败")
     return out == 1
 
 # the next functions help lift the equation As=t mod p to equationg As+pGr = t mod q
@@ -635,4 +635,3 @@ def lift_equation_PS(PS:proof_statement,BIG_RING:polyring_t,a:list,t:poly_t,s:li
          pGvec=p*Gvec
     PS.append_witness(v_dec)     
     PS.append_statement(a+[pGvec],witnum_s+[witnum_r],t) # the equation a*s+pG*v_dec = t
-

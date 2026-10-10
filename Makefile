@@ -6,7 +6,7 @@ CFLAGS_DEBUG = $(CFLAGS_WARN) -Og -ggdb3
 ADD_CPPFLAGS = -DNDEBUG
 
 CPPFLAGS += $(ADD_CPPFLAGS)
-LIBS = -lm $(HEXL_DIR)/build/hexl/lib64/libhexl.a -lstdc++
+LIBS = -lm $(HEXL_DIR)/build/hexl/lib/libhexl.a -lstdc++
 
 # honor user CFLAGS
 ifdef CFLAGS
@@ -191,17 +191,34 @@ HASH_INC = \
 HASH_SRC = $(HASH_DIR)/src/hash.c
 
 libhash.so: $(HASH_INC) $(HASH_SRC) src/hexl_shared.o libhexl_wrapper.so
-	$(CC) $(CFLAGS) -I$(HASH_DIR)/src -I$(HEXL_DIR)/hexl/include -fPIC -shared -o $@ $(HASH_SRC) $(LIBS) libhexl_wrapper.so src/hexl_shared.o
+	$(CC) $(CFLAGS) \
+		-mavx512f -mavx512bw -mavx512dq -mavx512vl \
+		-mavx512vbmi -mavx512vbmi2 -mavx512vnni \
+		-mvaes -maes -mpclmul \
+		-I$(HASH_DIR)/src -I$(HEXL_DIR)/hexl/include \
+		-fPIC -shared -o $@ $(HASH_SRC) $(LIBS) \
+		libhexl_wrapper.so src/hexl_shared.o
 
 libhexl_wrapper.so: $(HASH_DIR)/src/hexl_wrapper.cpp
-	 $(CC) $(CFLAGS) -I$(HASH_DIR)/src -I$(HEXL_DIR)/hexl/include -fPIC -shared -o $@ $< src/hexl_shared.o
+	$(CC) $(CFLAGS) \
+		-I$(HASH_DIR)/src -I$(HEXL_DIR)/hexl/include \
+		-fPIC -shared -o $@ $< src/hexl_shared.o
 
 #### lib labrador
 
 LABRADOR_CFLAGS = -std=gnu2x -Wall -Wextra -Wmissing-prototypes -Wredundant-decls \
   -Wshadow -Wpointer-arith -Wno-unused-function -fmax-errors=1 -flto=auto \
-  -fwrapv -ffast-math -march=native -mtune=native -O3 -DNDEBUG -fvisibility=hidden 
-LABRADOR_LIBS = -lmvec -lm
+  -fwrapv -ffast-math -fopenmp \
+  -fno-semantic-interposition -fno-plt \
+  -mavx512f -mavx512bw -mavx512dq -mavx512vl \
+  -mavx512vbmi -mavx512vbmi2 -mavx512vnni \
+  -mvaes -maes -mpclmul -mtune=native \
+  -O3 -DNDEBUG -fvisibility=hidden
+# Optional per-machine optimisation flags.  This keeps the default build
+# reproducible, while allowing a two-pass PGO build for the LaBRADOR/LNP
+# proving kernels without changing the proof system or its parameters.
+LABRADOR_EXTRA_CFLAGS ?=
+LABRADOR_LIBS = -fopenmp -lmvec -lm
 
 LABRADOR_DIR = src/labrados
 LABRADOR_INC = \
@@ -226,6 +243,7 @@ LABRADOR_INC = \
 	$(LABRADOR_DIR)/proofsystem.h \
 	$(LABRADOR_DIR)/randombytes.h \
 	$(LABRADOR_DIR)/rejection.h \
+	$(LABRADOR_DIR)/revac_profile.h \
 	$(LABRADOR_DIR)/malloc.h \
 	$(LABRADOR_DIR)/labrados_python.h \
 	$(LABRADOR_DIR)/timing.h
@@ -256,13 +274,13 @@ LABRADOR_SRC = \
 	$(LABRADOR_DIR)/timing.c
 
 liblabrador32.so: $(LABRADOR_SRC) $(LABRADOR_INC)
-	$(CC) $(LABRADOR_CFLAGS) -I$(LABRADOR_DIR) -DLOGQ=32 -shared -fvisibility=hidden -fPIC -o liblabrador32.so $(LABRADOR_SRC) $(LABRADOR_LIBS)
+	$(CC) $(LABRADOR_CFLAGS) $(LABRADOR_EXTRA_CFLAGS) -I$(LABRADOR_DIR) -DLOGQ=32 -shared -fvisibility=hidden -fPIC -o liblabrador32.so $(LABRADOR_SRC) $(LABRADOR_LIBS)
 
 liblabrador36.so: $(LABRADOR_SRC) $(LABRADOR_INC)
-	$(CC) $(LABRADOR_CFLAGS) -I$(LABRADOR_DIR) -DLOGQ=36 -shared -fvisibility=hidden -fPIC -o liblabrador36.so $(LABRADOR_SRC) $(LABRADOR_LIBS)
+	$(CC) $(LABRADOR_CFLAGS) $(LABRADOR_EXTRA_CFLAGS) -I$(LABRADOR_DIR) -DLOGQ=36 -shared -fvisibility=hidden -fPIC -o liblabrador36.so $(LABRADOR_SRC) $(LABRADOR_LIBS)
 
 liblabrador38.so: $(LABRADOR_SRC) $(LABRADOR_INC)
-	$(CC) $(LABRADOR_CFLAGS) -I$(LABRADOR_DIR) -DLOGQ=38 -shared -fvisibility=hidden -fPIC -o liblabrador38.so $(LABRADOR_SRC) $(LABRADOR_LIBS)
+	$(CC) $(LABRADOR_CFLAGS) $(LABRADOR_EXTRA_CFLAGS) -I$(LABRADOR_DIR) -DLOGQ=38 -shared -fvisibility=hidden -fPIC -o liblabrador38.so $(LABRADOR_SRC) $(LABRADOR_LIBS)
 
 
 #### lib lazer
@@ -524,4 +542,3 @@ clean:
 	cd $(THIRD_PARTY_DIR) && rm -rf $(FALCON_SUBDIR)
 	cd $(THIRD_PARTY_DIR) && rm -rf $(HEXL_SUBDIR)
 	cd tests && rm -f *.o *.dSYM && cd .. && rm -f $(TESTS) && rm -f sage-test.sage.py
-

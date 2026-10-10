@@ -63,6 +63,7 @@ typedef struct _labrador38_sparsecnst{
   labrador38_quadfunc quad;
   labrador38_linfunc lin;
   labrador38_polxvec b;
+  int borrowed;
 } labrador38_sparsecnst[1];
 
 typedef struct _labrador38_comcnst{
@@ -314,16 +315,43 @@ typedef struct _labrador38_dch_pack_params{
 } labrador38_dch_pack_params[1];
 
 void labrador38_py_init_witness(labrador38_witness wt, size_t r, size_t n[]);
+void labrador38_py_comkey_reset(void);
+size_t labrador38_py_comkey_nbytes(void);
+int labrador38_py_comkey_serialize(uint8_t *out, size_t outlen);
+int labrador38_py_comkey_deserialize(const uint8_t *in, size_t inlen);
 int labrador38_py_set_witness_vector(labrador38_witness wt, size_t idx, size_t n, size_t deg, const int64_t s[]);
 int labrador38_py_print_witness_vector(labrador38_witness wt, size_t idx);
 void labrador38_py_init_statement(labrador38_statement st, size_t r, size_t n[], uint64_t normsq[], uint64_t normsq_req[], int normty[], size_t num_rq_cnst, size_t num_zq_cnst, size_t num_int_cnst);
+void labrador38_py_statement_hash(uint8_t out[16], const labrador38_statement st);
 int labrador38_py_append_constraint(labrador38_statement st, size_t nvec, const size_t idx[], const size_t n[], size_t deg, int64_t *phi, int64_t *b, int full);
 int labrador38_py_append_quadratic(labrador38_statement st, size_t nlin, size_t nprod, const size_t idx_lin[], const size_t idx_prod1[], const size_t idx_prod2[], const size_t len_phi[], size_t deg, int64_t *a, int64_t *phi, int64_t *b);
+int labrador38_py_append_quadratic_monomials(labrador38_statement st, size_t nlin, size_t nprod, const size_t idx_lin[], const size_t idx_prod1[], const size_t idx_prod2[], const size_t len_phi[], size_t deg, int64_t *a, const uint32_t *monomial_exponents, int64_t *phi, int64_t *b);
 int labrador38_py_append_deg0_constraint(labrador38_statement st, size_t idx, size_t deg);
+int labrador38_py_append_deg0_vector_constraints(labrador38_statement st, size_t idx, size_t count);
+int labrador38_py_append_deg0_logical_vector_constraints(labrador38_statement st, size_t idx, size_t count, size_t deg);
+int labrador38_py_seeded_uniform_matrix_bank(int32_t *out, const uint8_t seed[32], size_t matrices, size_t blocks, size_t rows, size_t cols, size_t degree, uint32_t q, uint32_t qbits, uint32_t domain_separator);
+int labrador38_py_refresh_set_witness(labrador38_witness wt, const size_t *chunk_idx, const size_t *lift_idx, const int32_t *bank, const uint8_t *bits, size_t bit_count, size_t blocks, size_t rows, size_t cols, size_t degree, int64_t q, int64_t base, size_t chunks);
+int labrador38_py_statement_set_norms(labrador38_statement st, size_t count, const uint64_t *normsq);
+int labrador38_py_append_refresh_constraints(labrador38_statement st, size_t r_idx, const size_t *chunk_idx, const size_t *lift_idx, const int32_t *bank, size_t bit_count, size_t blocks, size_t rows, size_t cols, size_t degree, int64_t q, int64_t base, size_t chunks);
+int labrador38_py_append_refresh_phase_constraints(labrador38_statement st, size_t r_idx, const size_t *chunk_idx, const size_t *lift_idx, const int32_t *bank, size_t bit_count, size_t blocks, size_t lanes, size_t phases, size_t degree, const uint32_t *moduli, int64_t base, size_t chunks);
+int labrador38_py_decompose_set_witness(labrador38_witness wt, const size_t *indices, const int64_t *source, size_t poly_count, size_t degree, int64_t base, size_t chunks);
+int labrador38_py_malloc_trim(void);
+int labrador38_py_malloc_configure(size_t mmap_threshold, size_t trim_threshold, int arena_max);
+int labrador38_py_statement_rebind_tail(labrador38_statement st, size_t first, size_t count, const int64_t *rhs, const uint8_t static_hash[16]);
+void labrador38_py_statement_hash_reset(labrador38_statement st, const uint8_t hash[16]);
+int labrador38_py_statement_rebind_constraint_raw(labrador38_statement st, size_t index, size_t nvec, const size_t n[], size_t deg, const int64_t *phi, const int64_t *b, size_t nprod, const int64_t *a);
 int labrador38_py_gen_params(labrador38_dch_pack_params pp, const labrador38_statement ist, int zk, int debug);
 int labrador38_py_simple_verify(const labrador38_statement st, const labrador38_witness wt);
 void labrador38_py_prove(labrador38_dch_pack_proof pi, const labrador38_statement ist, const labrador38_witness iwt, const labrador38_dch_pack_params pp);
+int labrador38_py_last_prove_tail_valid(void);
 int labrador38_py_verify(const labrador38_statement ist, const labrador38_dch_pack_params pp, const labrador38_dch_pack_proof pi);
+size_t labrador38_py_proof_nbytes(const labrador38_dch_pack_params pp, const labrador38_dch_pack_proof pi);
+size_t labrador38_py_params_nbytes(const labrador38_dch_pack_params pp);
+int labrador38_py_params_serialize(uint8_t *out, size_t outlen, const labrador38_dch_pack_params pp);
+int labrador38_py_params_deserialize(labrador38_dch_pack_params pp, const uint8_t *in, size_t inlen);
+int labrador38_py_params_is_zk(const labrador38_dch_pack_params pp);
+int labrador38_py_proof_serialize(uint8_t *out, size_t outlen, const labrador38_dch_pack_params pp, const labrador38_dch_pack_proof pi);
+int labrador38_py_proof_deserialize(labrador38_dch_pack_proof pi, const labrador38_dch_pack_params pp, const uint8_t *in, size_t inlen);
 void labrador38_py_free_witness(labrador38_witness wt);
 void labrador38_py_free_statement(labrador38_statement st);
 void labrador38_py_free_params(labrador38_dch_pack_params pp);

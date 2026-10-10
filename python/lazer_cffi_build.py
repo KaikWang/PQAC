@@ -28,16 +28,43 @@ typedef struct _PREFIXdch_pack_params{
 } PREFIXdch_pack_params[1];
 
 void PREFIXpy_init_witness(PREFIXwitness wt, size_t r, size_t n[]);
+void PREFIXpy_comkey_reset(void);
+size_t PREFIXpy_comkey_nbytes(void);
+int PREFIXpy_comkey_serialize(uint8_t *out, size_t outlen);
+int PREFIXpy_comkey_deserialize(const uint8_t *in, size_t inlen);
 int PREFIXpy_set_witness_vector(PREFIXwitness wt, size_t idx, size_t n, size_t deg, const int64_t s[]);
 int PREFIXpy_print_witness_vector(PREFIXwitness wt, size_t idx);
 void PREFIXpy_init_statement(PREFIXstatement st, size_t r, size_t n[], uint64_t normsq[], uint64_t normsq_req[], int normty[], size_t num_rq_cnst, size_t num_zq_cnst, size_t num_int_cnst);
+void PREFIXpy_statement_hash(uint8_t out[16], const PREFIXstatement st);
 int PREFIXpy_append_constraint(PREFIXstatement st, size_t nvec, const size_t idx[], const size_t n[], size_t deg, int64_t *phi, int64_t *b, int full);
 int PREFIXpy_append_quadratic(PREFIXstatement st, size_t nlin, size_t nprod, const size_t idx_lin[], const size_t idx_prod1[], const size_t idx_prod2[], const size_t len_phi[], size_t deg, int64_t *a, int64_t *phi, int64_t *b);
+int PREFIXpy_append_quadratic_monomials(PREFIXstatement st, size_t nlin, size_t nprod, const size_t idx_lin[], const size_t idx_prod1[], const size_t idx_prod2[], const size_t len_phi[], size_t deg, int64_t *a, const uint32_t *monomial_exponents, int64_t *phi, int64_t *b);
 int PREFIXpy_append_deg0_constraint(PREFIXstatement st, size_t idx, size_t deg);
+int PREFIXpy_append_deg0_vector_constraints(PREFIXstatement st, size_t idx, size_t count);
+int PREFIXpy_append_deg0_logical_vector_constraints(PREFIXstatement st, size_t idx, size_t count, size_t deg);
+int PREFIXpy_seeded_uniform_matrix_bank(int32_t *out, const uint8_t seed[32], size_t matrices, size_t blocks, size_t rows, size_t cols, size_t degree, uint32_t q, uint32_t qbits, uint32_t domain_separator);
+int PREFIXpy_refresh_set_witness(PREFIXwitness wt, const size_t *chunk_idx, const size_t *lift_idx, const int32_t *bank, const uint8_t *bits, size_t bit_count, size_t blocks, size_t rows, size_t cols, size_t degree, int64_t q, int64_t base, size_t chunks);
+int PREFIXpy_statement_set_norms(PREFIXstatement st, size_t count, const uint64_t *normsq);
+int PREFIXpy_append_refresh_constraints(PREFIXstatement st, size_t r_idx, const size_t *chunk_idx, const size_t *lift_idx, const int32_t *bank, size_t bit_count, size_t blocks, size_t rows, size_t cols, size_t degree, int64_t q, int64_t base, size_t chunks);
+int PREFIXpy_append_refresh_phase_constraints(PREFIXstatement st, size_t r_idx, const size_t *chunk_idx, const size_t *lift_idx, const int32_t *bank, size_t bit_count, size_t blocks, size_t lanes, size_t phases, size_t degree, const uint32_t *moduli, int64_t base, size_t chunks);
+int PREFIXpy_decompose_set_witness(PREFIXwitness wt, const size_t *indices, const int64_t *source, size_t poly_count, size_t degree, int64_t base, size_t chunks);
+int PREFIXpy_malloc_trim(void);
+int PREFIXpy_malloc_configure(size_t mmap_threshold, size_t trim_threshold, int arena_max);
+int PREFIXpy_statement_rebind_tail(PREFIXstatement st, size_t first, size_t count, const int64_t *rhs, const uint8_t static_hash[16]);
+void PREFIXpy_statement_hash_reset(PREFIXstatement st, const uint8_t hash[16]);
+int PREFIXpy_statement_rebind_constraint_raw(PREFIXstatement st, size_t index, size_t nvec, const size_t n[], size_t deg, const int64_t *phi, const int64_t *b, size_t nprod, const int64_t *a);
 int PREFIXpy_gen_params(PREFIXdch_pack_params pp, const PREFIXstatement ist, int zk, int debug);
 int PREFIXpy_simple_verify(const PREFIXstatement st, const PREFIXwitness wt);
 void PREFIXpy_prove(PREFIXdch_pack_proof pi, const PREFIXstatement ist, const PREFIXwitness iwt, const PREFIXdch_pack_params pp);
+int PREFIXpy_last_prove_tail_valid(void);
 int PREFIXpy_verify(const PREFIXstatement ist, const PREFIXdch_pack_params pp, const PREFIXdch_pack_proof pi);
+size_t PREFIXpy_proof_nbytes(const PREFIXdch_pack_params pp, const PREFIXdch_pack_proof pi);
+size_t PREFIXpy_params_nbytes(const PREFIXdch_pack_params pp);
+int PREFIXpy_params_serialize(uint8_t *out, size_t outlen, const PREFIXdch_pack_params pp);
+int PREFIXpy_params_deserialize(PREFIXdch_pack_params pp, const uint8_t *in, size_t inlen);
+int PREFIXpy_params_is_zk(const PREFIXdch_pack_params pp);
+int PREFIXpy_proof_serialize(uint8_t *out, size_t outlen, const PREFIXdch_pack_params pp, const PREFIXdch_pack_proof pi);
+int PREFIXpy_proof_deserialize(PREFIXdch_pack_proof pi, const PREFIXdch_pack_params pp, const uint8_t *in, size_t inlen);
 void PREFIXpy_free_witness(PREFIXwitness wt);
 void PREFIXpy_free_statement(PREFIXstatement st);
 void PREFIXpy_free_params(PREFIXdch_pack_params pp);
@@ -426,9 +453,19 @@ void compute_delta(signed_poly512 image, signed_poly512 cutoff, poly512 left_inp
 
 includedirs = [prefix]
 # XXX get hexl path from build system
-libdirs = [prefix, f"{prefix}/third_party/hexl-development/build/hexl/lib/", f"{prefix}/third_party/hexl-development/build/hexl/lib64/",f"{prefix}/src/lattice-hash"]
+libdirs = [
+    prefix,
+    f"{prefix}/third_party/hexl-development/build/hexl/lib/",
+    f"{prefix}/third_party/hexl-development/build/hexl/lib64/",
+    (f"{prefix}/third_party/hexl-development/build/cmake/third-party/"
+     "cpu-features/cpu-features-build/lib/"),
+    f"{prefix}/src/lattice-hash",
+]
 runtimelibdirs = [prefix, f"{prefix}/third_party/hexl-development/build/hexl/lib/", f"{prefix}/third_party/hexl-development/build/hexl/lib64/"]
-libs_lazer = ['lazer', 'hexl', 'mpfr', 'gmp', 'm', 'stdc++']
+# HEXL links CpuFeatures as a separate static dependency when CMake finds a
+# pre-installed CpuFeatures package.  Keep it after hexl so static link order
+# resolves GetX86Info and the other runtime CPU-detection symbols.
+libs_lazer = ['lazer', 'hexl', 'cpu_features', 'mpfr', 'gmp', 'm', 'stdc++']
 source_lazer = """
 #include "lazer.h"
 """
