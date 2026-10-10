@@ -146,6 +146,8 @@ class FullQ88BridgeManifest:
     witness_slots: tuple[int, ...]
     handle_auxiliary_slots: tuple[int, ...]
     refresh_auxiliary_slots: tuple[int, ...]
+    handle_product_slots: tuple[int, ...]
+    refresh_product_slots: tuple[int, ...]
     accumulator_lift_slots: tuple[tuple[int, ...], ...]
     accumulator_lane_count: int
     handle_binding_equations: int
@@ -159,6 +161,10 @@ class FullQ88BridgeManifest:
             raise ValueError("q88 bridge handle auxiliary columns incomplete")
         if len(self.refresh_auxiliary_slots) != REFRESH_BLOCKS:
             raise ValueError("q88 bridge refresh auxiliary columns incomplete")
+        if len(self.handle_product_slots) != HANDLE_BITS * GADGET_DIGITS:
+            raise ValueError("q88 bridge handle products incomplete")
+        if len(self.refresh_product_slots) != REFRESH_BLOCKS:
+            raise ValueError("q88 bridge refresh products incomplete")
         if len(self.accumulator_lift_slots) != 3:
             raise ValueError("q88 bridge lift lanes incomplete")
         if self.handle_binding_equations < HANDLE_BITS:
@@ -186,6 +192,9 @@ def build_full_q88_manifest(relation: EffectiveLaneRelation) -> FullQ88BridgeMan
         witness_slots=relation_slots,
         handle_auxiliary_slots=tuple(handle_slots),
         refresh_auxiliary_slots=tuple(refresh_slots),
+        handle_product_slots=tuple(range(174, 174 + handle_count)),
+        refresh_product_slots=tuple(range(174 + handle_count,
+                                         174 + handle_count + REFRESH_BLOCKS)),
         accumulator_lift_slots=tuple(
             tuple(range(lane * 7, lane * 7 + 7)) for lane in range(3)),
         accumulator_lane_count=3,
