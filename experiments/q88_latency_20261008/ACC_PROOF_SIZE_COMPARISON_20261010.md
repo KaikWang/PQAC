@@ -153,3 +153,22 @@ coefficients in a production proof.  That would reveal or fix the hidden
 handle/selector.  The current KAT deliberately stops before those rows; its
 purpose is to validate the exact integer bridge and quotient/carry arithmetic,
 not to claim a secure q88 proof yet.
+
+## 2026-10-10: serialized single-Pack measurement
+
+The degree-4096 single-statement Pack KAT was run on `autodl-pqac8` with the
+native serializer enabled.  It passed clear verification and Pack Verify:
+
+```text
+backend witness polynomials: 48
+Pack Prove: 2.865 s
+Pack Verify: 1.477 s
+serialized single Pack proof: 157370 bytes = 153.68 KiB
+```
+
+This is a real serialized single Pack proof, but it is the existing arithmetic
+KAT relation, not the complete q88 accumulator relation.  It is therefore a
+lower-bound reference for the adapter and must not be reported as the q88
+result.  The remaining integration work is to feed the 174 q88 witness columns
+plus the bound handle/refresh auxiliary equations into the same native
+statement, then rerun this exact serialization measurement.
