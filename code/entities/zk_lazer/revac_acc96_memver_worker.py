@@ -420,6 +420,14 @@ def prepare_prover(dynamic: bytes, entry: dict[str, Any]) -> bool:
         raise ValueError("invalid q96 prover-prewarm payload length")
     prover = ProverPayload(dynamic[:PROVER_BYTES])
     link = LinkPayload.decode(dynamic[PROVER_BYTES:])
+    bridge_dump = os.environ.get("REVAC_Q96_EXPERIMENT_INPUT_DUMP")
+    if bridge_dump:
+        dump_dir = pathlib.Path(bridge_dump)
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        (dump_dir / "prover_link.bin").write_bytes(dynamic)
+        public_raw = entry.get("public_raw")
+        if public_raw is not None:
+            (dump_dir / "public.bin").write_bytes(public_raw)
     if link.accumulator_digest != prover.accumulator_digest:
         raise ValueError("q96 link/prover accumulator digest mismatch")
     _bind_deployment_profile(
