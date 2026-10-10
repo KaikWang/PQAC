@@ -324,6 +324,7 @@ class SafeMainRelation:
     witness: tuple[tuple[int, ...], ...]
     target: tuple[tuple[int, ...], ...]
     witness_slots: tuple[int, ...]
+    product_indices_by_lane: tuple[tuple[int, ...], ...]
 
 
 def build_safe_main_relation(public: Any, prover: Any,
@@ -342,7 +343,7 @@ def build_safe_main_relation(public: Any, prover: Any,
     product_slots = tuple(aggregate_slot + 1 + lane * REFRESH_BLOCKS + block
                           for lane in range(3)
                           for block in range(REFRESH_BLOCKS))
-    common_witness = list(relation.witness) + [tuple(handle_product)]
+    common_witness = list(relation.witness[:2 + TRUNC_RIGHT]) + [tuple(handle_product)]
     common_witness.extend(tuple(refresh_product[0][block])
                           for block in range(REFRESH_BLOCKS))
     # Products are mathematically common integer witnesses.  Lane copies are
@@ -372,7 +373,10 @@ def build_safe_main_relation(public: Any, prover: Any,
             one[0] = 1
             columns.append(one)
         columns_by_lane.append(tuple(tuple(column) for column in columns))
-    safe_slots = tuple(witness_slots) + (aggregate_slot,) + product_slots
+    safe_slots = tuple(witness_slots[:2 + TRUNC_RIGHT]) + (aggregate_slot,) + product_slots
+    product_indices_by_lane = tuple(tuple(2 + TRUNC_RIGHT + 1 + lane * REFRESH_BLOCKS + block
+                                          for block in range(REFRESH_BLOCKS))
+                                    for lane in range(3))
     targets = relation.target
     return SafeMainRelation(tuple(columns_by_lane), tuple(common_witness),
-                            targets, safe_slots)
+                            targets, safe_slots, product_indices_by_lane)
