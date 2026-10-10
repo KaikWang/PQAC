@@ -306,3 +306,14 @@ def digitize_auxiliary_products(handle_products: tuple[tuple[int, ...], ...],
     result = AuxiliaryDigitWitness(base, handle_digits, refresh_digits)
     result.verify()
     return result
+
+
+def require_safe_bridge_manifest(manifest: FullQ88BridgeManifest) -> None:
+    """Reject incomplete/effective-coefficient statements before proving."""
+    manifest.validate()
+    if not manifest.handle_product_slots or not manifest.refresh_product_slots:
+        raise ValueError("q88 bridge refuses effective hidden coefficients")
+    if manifest.handle_binding_equations < HANDLE_BITS:
+        raise ValueError("q88 bridge handle binding is incomplete")
+    if manifest.refresh_binding_equations < REFRESH_BITS:
+        raise ValueError("q88 bridge refresh binding is incomplete")
