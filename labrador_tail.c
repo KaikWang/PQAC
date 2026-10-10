@@ -6,8 +6,20 @@
 #include "polz.h"
 #include "jlproj.h"
 #include "malloc.h"
+#include "revac_profile.h"
 #include "fips202.h"
 #include "inttypes.h"
+
+static int tail_debug_verify_enabled(void) {
+  const char *value = getenv("REVAC_LABRADOR_DCH_VERIFY");
+  return value != NULL && value[0] != '\0' && value[0] != '0';
+}
+
+static _Thread_local int tail_last_prove_valid = 1;
+
+int ldr_tail_last_prove_valid(void) {
+  return tail_last_prove_valid;
+}
 
 static void ldr_tail_amortize(
   polz *hz,
@@ -31,7 +43,8 @@ static void ldr_tail_amortize(
 
   // h_0 = <phi[0], sx[0]>
   polxvec_sprod(hx, phi[0], sx[0]);
-  polzvec_frompolxvec(&hz[0], hx, 0, 1, 1);
+  polxvec_exact_refresh(hx);
+  polzvec_exact_frompolxvec(&hz[0], hx, 0, 1, 1);
 
   update_hash_polz(hash, &hz[0], 1);
   sample_chalx_amortize(&chalx_amortize[0], 1, hash);
@@ -52,20 +65,23 @@ static void ldr_tail_amortize(
     polxvec_init_subvec2(phi_sv, phi_amortize, 0, 1, pp->n[i]);
     polxvec_sprod(hx, phi[i], zx_sv);
     polxvec_sprod_add(hx, phi_sv, sx[i]);
-    polzvec_frompolxvec(&hz[2*i-1], hx, 0, 1, 1);
+    polxvec_exact_refresh(hx);
+    polzvec_exact_frompolxvec(&hz[2*i-1], hx, 0, 1, 1);
 
     // h_(2*i) = <phi[i], sx[i]>
     polxvec_sprod(hx, phi[i], sx[i]);
-    polzvec_frompolxvec(&hz[2*i], hx, 0, 1, 1);
+    polzvec_exact_frompolxvec(&hz[2*i], hx, 0, 1, 1);
 
     update_hash_polz(hash, &hz[2*i-1], 2);
     sample_chalx_amortize(&chalx_amortize[i], 1, hash);
 
     // z += c_i * sx[i]
     polxvec_polx_mul_add(zx_sv, chalx_amortize[i], sx[i]);
+    polxvec_exact_refresh(zx_sv);
 
     // phi_amortize += c_i * phi[i]
     polxvec_polx_mul_add(phi_sv, chalx_amortize[i], phi[i]);
+    polxvec_exact_refresh(phi_sv);
   }
 
   polxvec_decompose(zy, zx, zx->len, pp->fz, pp->bz);
@@ -128,6 +144,7 @@ static void ldr_tail_addcheck_amortization(
   for(i=0;i<pp->r;i++){
     polzvec_topolxvec(tx, &tz[i * pp->kappa[0]], 0, 1, pp->kappa[0]);
     polxvec_polx_mul_add(c->b, chalx[i], tx);
+    polxvec_exact_refresh(c->b);
   }
   polxvec_refresh(c->b);
 
@@ -169,6 +186,7 @@ static void ldr_tail_addcheck_quadg(
     polzvec_topolxvec(gx, &gz[off], 0, 1, 1);
     polx_mul(cprod, chalx[i], chalx[i]);
     polxvec_polx_mul_add(c->b, cprod, gx);
+    polxvec_exact_refresh(c->b);
     off++;
 
     polx_scale(cdouble, chalx[i], 2);
@@ -176,6 +194,7 @@ static void ldr_tail_addcheck_quadg(
       polzvec_topolxvec(gx, &gz[off], 0, 1, 1);
       polx_mul(cprod, cdouble, chalx[j]);
       polxvec_polx_mul_add(c->b, cprod, gx);
+      polxvec_exact_refresh(c->b);
       off++;
     }
   }
@@ -216,10 +235,12 @@ static void ldr_tail_addcheck_ling(
   for(i=1;i<pp->r;i++){
     polzvec_topolxvec(hx, &hz[2*i-1], 0, 1, 1);
     polxvec_polx_mul_add(c->b, chalx[i], hx);
+    polxvec_exact_refresh(c->b);
 
     polzvec_topolxvec(hx, &hz[2*i], 0, 1, 1);
     polx_mul(csquare, chalx[i], chalx[i]);
     polxvec_polx_mul_add(c->b, csquare, hx);
+    polxvec_exact_refresh(c->b);
   }
 
   polxvec_free(hx);
@@ -281,6 +302,7 @@ static int ldr_tail_check_system(
     for(l=0;l<pp->rr[i];l++){
       polzvec_topolxvec(gx,&gz[trimat_idx(rmap[i]+l, rmap[j]+l, pp->r)],0,1,1);
       polxvec_polx_mul_add(ev, finalcnst->quad->coeffs[k], gx);
+      polxvec_exact_refresh(ev);
     }
   }
 
@@ -288,10 +310,12 @@ static int ldr_tail_check_system(
   for(i=0;i<pp->r;i++){
     polzvec_topolxvec(hx, &hz[2*i], 0, 1, 1);
     polxvec_add(ev, ev, hx);
+    polxvec_exact_refresh(ev);
   }
 
   // ev -= b
   polxvec_sub(ev, ev, finalcnst->b);
+  polxvec_exact_refresh(ev);
 
   check = polxvec_iszero(ev);
 
@@ -317,6 +341,13 @@ void ldr_tail_prove(
   polx *chalx_amortize;
   polxvec sxl, sxq[pp->r], sxq_old[ist->r], phi[pp->r], phi_amortize, tx, liftx;
   sparsecnst zqagg[LIFTS], finalcnst;
+
+  tail_last_prove_valid = 1;
+
+  if(tail_debug_verify_enabled()){
+    fprintf(stderr, "[Labrador Tail 诊断] 输入关系：%s\n",
+            verify(ist, iwt) ? "通过" : "失败");
+  }
 
   // View input witness with new split
 
@@ -354,7 +385,8 @@ void ldr_tail_prove(
   polxvec_init(tx, pp->kappa[0], 1);
   for(i=0;i<pp->r;i++){
     commit(tx, sxq[i]);
-    polzvec_frompolxvec(&pi->m[0][pp->kappa[0] * i], tx, 0, 1, pp->kappa[0]);
+    polzvec_frompolxvec(&pi->m[0][pp->kappa[0] * i], tx,
+                        0, 1, pp->kappa[0]);
   }
 
   // Quadratic garbage
@@ -406,6 +438,12 @@ void ldr_tail_prove(
   // Generate constraints for the verifier's checks
   
   ldr_tail_addchecks(ost, pp, pi, chalx_amortize, phi_amortize);
+
+  tail_last_prove_valid = ldr_tail_check_system(finalcnst, pi, pp);
+  if(!tail_last_prove_valid){
+    fprintf(stderr, "ERROR in ldr_tail_prove(): the generated system check "
+                    "is not satisfied before serialization\n");
+  }
 
   for(i=0;i<LIFTS;i++){
     sparsecnst_free(zqagg[i]);

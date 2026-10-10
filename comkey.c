@@ -26,7 +26,7 @@ polxvec comkey;
   from comkey.
 */
 void comkey_init(size_t len) {
-  size_t off;
+  size_t off, pos, chunk;
   __attribute__((aligned(16)))
   uint8_t seed[16] = {};
   polxvec backup, newcomkey;
@@ -51,11 +51,21 @@ void comkey_init(size_t len) {
     polxvec_free(backup);
   }
 
-  polxvec_init_subvec2(newcomkey, comkey, off, 1, len);
-  polxvec_almostuniform(newcomkey, seed, comkey_nonce++);
+  for(pos = off; pos < off + len; pos += 32){
+    chunk = (off + len - pos) < 32 ? (off + len - pos) : 32;
+    polxvec_init_subvec2(newcomkey, comkey, pos, 1, chunk);
+    polxvec_almostuniform(newcomkey, seed, pos / 32);
+  }
+  comkey_nonce = comkey->len / 32;
 }
 
 void comkey_free(){
   polxvec_free(comkey);
   comkey_nonce = 0;
+}
+
+void comkey_reset(){
+  if(comkey_nonce){
+    comkey_free();
+  }
 }

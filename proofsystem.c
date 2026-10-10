@@ -11,6 +11,12 @@
 #include "jlproj.h"
 #include "comkey.h"
 
+static int proof_hash_canonical;
+
+void proof_hash_canonical_set(int enabled) {
+  proof_hash_canonical = enabled != 0;
+}
+
 static int64_t cmodq(int64_t a) {
   int64_t t;
   const int64_t mask = ((int64_t)1 << LOGQ) - 1;
@@ -93,7 +99,17 @@ int sis_secure(size_t rank, double norm){
 void update_hash_polz(uint8_t h[16], const polz *in, size_t len){
   uint8_t hashbuf[16 + len * POLZBYTES];
   memcpy(hashbuf, h, 16);
-  polzvec_bitpack(&hashbuf[16], in, len);
+  if (proof_hash_canonical) {
+    __attribute__((aligned(64))) polz canonical;
+    for (size_t i = 0; i < len; i++) {
+      memcpy(canonical, in[i], sizeof(polz));
+      polz_reduce(canonical);
+      polz_caddq(canonical);
+      polz_bitpack(&hashbuf[16 + i * POLZBYTES], canonical);
+    }
+  } else {
+    polzvec_bitpack(&hashbuf[16], in, len);
+  }
   shake128(h, 16, hashbuf, sizeof(hashbuf));
 }
 

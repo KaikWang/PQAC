@@ -3,13 +3,89 @@
 #include <math.h>
 #include <stdio.h>
 #include <assert.h>
+#include <stdlib.h>
+#include <string.h>
 #include "aesctr.h"
 #include "data.h"
+#include "fips202.h"
 #include "polx.h"
 #include "poly.h"
 #include "polz.h"
 #include "malloc.h"
 #include "gaussian.h"
+#include "revac_profile.h"
+
+#define REVAC_GAUSSIAN_PAR_CHUNK_COEFFS 65536U
+
+static int revac_gaussian_parallel_enabled(void) {
+  const char *value = getenv("REVAC_LABRADOR_GAUSSIAN_PARALLEL");
+  /* Each chunk owns its AES state, randbuf and output interval.  Earlier
+   * failures attributed to this path were reproduced only when unrelated
+   * experimental LNP sections shared mutable polynomial state.  With those
+   * sections disabled, isolated stress tests (50 accumulator proofs plus 20
+   * complete shows) verified every proof.  Keep an explicit serial rollback
+   * for small hosts and diagnostics without changing proof parameters. */
+  if (value != NULL && value[0] != '\0')
+    return value[0] != '0';
+  return 1;
+}
+
+static int revac_gaussian_threads(size_t work) {
+#ifdef _OPENMP
+  const char *value = getenv("REVAC_LABRADOR_GAUSSIAN_THREADS");
+  char *end = NULL;
+  long requested;
+  if(value == NULL || value[0] == '\0')
+    return revac_labrador_team_threads(work);
+  requested = strtol(value, &end, 10);
+  if(end == value || *end != '\0' || requested < 1)
+    return 1;
+  if(requested > omp_get_max_threads()) requested = omp_get_max_threads();
+  if((size_t)requested > work) requested = (long)work;
+  return (int)requested;
+#else
+  (void)work;
+  return 1;
+#endif
+}
+
+static void revac_store_u64_le(uint8_t out[8], uint64_t value) {
+  for (size_t i = 0; i < 8; i++)
+    out[i] = (uint8_t)(value >> (8 * i));
+}
+
+/* Sample fixed-size, independently domain-separated coefficient chunks.  The
+ * chunk boundaries do not depend on the OpenMP thread count, so a proof run is
+ * reproducible across machines with different core counts.  Each chunk is an
+ * independent invocation of the unchanged discrete-Gaussian sampler; only
+ * the PRG stream partitioning changes, not sigma or the response format. */
+static void revac_gaussian_i32_parallel(
+    int32_t *coeffs, size_t nelems, unsigned int log2sd,
+    const uint8_t seed[16], uint64_t nonce, int threads) {
+  const size_t chunks =
+      (nelems + REVAC_GAUSSIAN_PAR_CHUNK_COEFFS - 1) /
+      REVAC_GAUSSIAN_PAR_CHUNK_COEFFS;
+
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(threads) if(chunks > 1 && threads > 1) schedule(static)
+#endif
+  for (size_t chunk = 0; chunk < chunks; chunk++) {
+    uint8_t domain[40];
+    uint8_t chunk_key[16];
+    aes128ctr_ctx state;
+    const size_t off = chunk * REVAC_GAUSSIAN_PAR_CHUNK_COEFFS;
+    const size_t count = MIN(REVAC_GAUSSIAN_PAR_CHUNK_COEFFS,
+                             nelems - off);
+
+    memcpy(domain, seed, 16);
+    revac_store_u64_le(domain + 16, nonce);
+    revac_store_u64_le(domain + 24, chunk);
+    memcpy(domain + 32, "LNP-GAUS", 8);
+    shake128(chunk_key, sizeof(chunk_key), domain, sizeof(domain));
+    aes128ctr_init(&state, chunk_key, 0);
+    gaussian_i32(coeffs + off, (unsigned int)count, &state, log2sd);
+  }
+}
 
 void polz_print(const polz a) {
   size_t i,j;
@@ -418,9 +494,12 @@ void polz_center(polz r) {
 }
 
 void polzvec_center(polz *r, size_t len) {
-  size_t i;
+  const int threads = revac_labrador_team_threads(len);
 
-  for(i=0;i<len;i++)
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(threads) if(revac_labrador_parallel_work(len, 32)) schedule(static)
+  #endif
+  for(size_t i=0;i<len;i++)
     polz_center(r[i]);
 }
 
@@ -487,9 +566,12 @@ void polz_frompoly(polz r, const poly a) {
 }
 
 void polzvec_frompolyvec(polz *r, const poly *a, ssize_t stride, size_t len) {
-  size_t i;
+  const int threads = revac_labrador_team_threads(len);
 
-  for(i=0;i<len;i++)
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(threads) if(revac_labrador_parallel_work(len, 32)) schedule(static)
+  #endif
+  for(size_t i=0;i<len;i++)
     polz_frompoly(r[i],a[stride*i]);
 }
 
@@ -504,14 +586,25 @@ void polz_topolx(polx r, const polz a) {
 }
 
 void polzvec_topolxvec(polxvec r, const polz *a, size_t off, ssize_t stride, size_t len) {
-  size_t i,j,k;
+  size_t i,k;
+  const size_t nblocks = (len + 31) / 32;
+  const int threads = revac_labrador_team_threads(nblocks);
 
   assert(off < r->len);
   assert(off+stride*(len-1) < r->len);
   polxvec_setwidths1(r,off,stride,len,ldexp(1,2*LOGQ)/12.0);
   off *= r->stride;
   stride *= r->stride;
-  for(j=0;(k=MIN(32,len-j));j+=k) {
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(threads) \
+      if(revac_labrador_conversion_parallel_enabled(\
+             "REVAC_LABRADOR_TOPOLX_PARALLEL") && \
+         revac_labrador_parallel_work(nblocks, 2)) \
+      schedule(static) private(i,k)
+  #endif
+  for(size_t block=0;block<nblocks;block++) {
+    const size_t j = block * 32;
+    k = MIN(32,len-j);
     for(i=0;i<K;i++) {
       polzvec_topolyvec_montgomery(&r->proj[i][off+j*stride],&a[j],stride,k,primes[i]);
       polyvec_ntt(&r->proj[i][off+stride*j],&r->proj[i][off+stride*j],stride,stride,k,primes[i]);
@@ -716,13 +809,129 @@ static void frompolxvec(polz *r, const polxvec a, size_t off, ssize_t stride, si
   polzvec_reduce(r,len);
 }
 
-void polzvec_frompolxvec(polz *r, const polxvec a, size_t off, ssize_t stride, size_t len) {
-  size_t j,k;
+static int64_t exact_positive_mod(__int128 value, int64_t mod) {
+  int64_t reduced = (int64_t)(value % mod);
+  return reduced < 0 ? reduced + mod : reduced;
+}
+
+static int64_t exact_center_mod_q(__int128 value) {
+  const int64_t q = ((int64_t)1 << LOGQ) - QOFF;
+
+  value %= q;
+  if(value > q/2)
+    value -= q;
+  else if(value < -q/2)
+    value += q;
+  return (int64_t)value;
+}
+
+static int exact_crt_initialized;
+static int64_t exact_inv_scale[K];
+static int64_t exact_crt_inv[K];
+static __int128 exact_crt_factor[K];
+static __int128 exact_crt_product;
+
+static void exact_crt_init(void) {
+  size_t k;
+
+  if(exact_crt_initialized) return;
+#ifdef _OPENMP
+#pragma omp critical(polz_exact_crt_init)
+#endif
+  {
+    if(!exact_crt_initialized){
+      polx one, one_coeffs;
+
+      polx_monomial(one, 0, 1);
+      polx_invntt(one_coeffs, one);
+      exact_crt_product = 1;
+      for(k=0;k<K;k++)
+        exact_crt_product *= primes[k]->p;
+      for(k=0;k<K;k++){
+        const int64_t scale = exact_positive_mod(
+            one_coeffs->proj[k]->c[0], primes[k]->p);
+        exact_inv_scale[k] = exact_positive_mod(
+            pow_simple((int16_t)scale, primes[k]->p-2, primes[k]),
+            primes[k]->p);
+        exact_crt_factor[k] = exact_crt_product / primes[k]->p;
+        exact_crt_inv[k] = exact_positive_mod(
+            pow_simple((int16_t)exact_positive_mod(
+                           exact_crt_factor[k], primes[k]->p),
+                       primes[k]->p-2, primes[k]),
+            primes[k]->p);
+      }
+      exact_crt_initialized = 1;
+    }
+  }
+}
+
+static void exact_frompolxvec(polz *r, const polxvec a, size_t off,
+                              ssize_t stride, size_t len) {
+  size_t coefficient, i, k;
+  poly residues[K][len];
+
+  for(k=0;k<K;k++)
+    polyvec_invntt(residues[k], &a->proj[k][a->stride*off], 1,
+                   a->stride*stride, len, primes[k]);
+
+  for(i=0;i<len;i++){
+    for(coefficient=0;coefficient<N;coefficient++){
+      __int128 value = 0;
+
+      for(k=0;k<K;k++){
+        const int64_t prime = primes[k]->p;
+        const int64_t residue = exact_positive_mod(
+            (__int128)residues[k][i]->c[coefficient] * exact_inv_scale[k],
+            prime);
+        const int64_t alpha = exact_positive_mod(
+            (__int128)residue * exact_crt_inv[k], prime);
+        value += exact_crt_factor[k] * alpha;
+      }
+      value -= ((value + exact_crt_product/2) / exact_crt_product) *
+               exact_crt_product;
+      polz_setcoeff_fromint64(r[i], exact_center_mod_q(value), coefficient);
+    }
+  }
+}
+
+void polzvec_exact_frompolxvec(polz *r, const polxvec a, size_t off,
+                               ssize_t stride, size_t len) {
+  const size_t nblocks = (len + 31) / 32;
+  const int threads = revac_labrador_team_threads(nblocks);
 
   assert(off < a->len);
   assert(off+stride*(len-1) < a->len);
-  for(j=0;(k=MIN(32,len-j));j+=k)
+  exact_crt_init();
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(threads) \
+    if(revac_labrador_conversion_parallel_enabled(\
+           "REVAC_LABRADOR_FROMPOLX_PARALLEL") && \
+       revac_labrador_parallel_work(nblocks, 2)) schedule(static)
+#endif
+  for(size_t block=0;block<nblocks;block++){
+    const size_t j = block * 32;
+    const size_t k = MIN(32,len-j);
+    exact_frompolxvec(&r[j], a, off+j*stride, stride, k);
+  }
+}
+
+void polzvec_frompolxvec(polz *r, const polxvec a, size_t off, ssize_t stride, size_t len) {
+  const size_t nblocks = (len + 31) / 32;
+  const int threads = revac_labrador_team_threads(nblocks);
+
+  assert(off < a->len);
+  assert(off+stride*(len-1) < a->len);
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(threads) \
+      if(revac_labrador_conversion_parallel_enabled(\
+             "REVAC_LABRADOR_FROMPOLX_PARALLEL") && \
+         revac_labrador_parallel_work(nblocks, 2)) schedule(static)
+  #endif
+  for(size_t block=0;block<nblocks;block++) {
+    const size_t j = block * 32;
+    const size_t k = MIN(32,len-j);
     frompolxvec(&r[j],a,off+j*stride,stride,k);
+  }
 }
 
 void polz_add(polz r, const polz a, const polz b) {
@@ -1079,19 +1288,29 @@ void polz_printint64(const polz a) {
   }
 }
 
-int64_t polzvec_sprodz(const polz *a, const polz *b, size_t len) {
-  zz coeffa, coeffb;
-  int64_t sum, ia, ib;
-  size_t i, j;
+/* The rejection checks only need centered signed 64-bit coefficients.  The
+ * old path copied every coefficient into a temporary zz object before
+ * reconstructing the same value.  Keep the limb order and sign convention
+ * identical to int64_fromzz(), but read the limbs in place. */
+static inline int64_t polz_coeff_i64_fast(const polz a, size_t k) {
+  int64_t value = a->limbs[0]->c[k];
+  for (size_t limb = 1; limb < L; limb++)
+    value += (int64_t)a->limbs[limb]->c[k] << (14 * limb);
+  return value;
+}
 
-  sum = 0;
-  for (i = 0; i < len; i++) {
-    for(j = 0; j < N; j++) {
-      polz_getcoeff(coeffa, a[i], j);
-      polz_getcoeff(coeffb, b[i], j);
-      
-      ia = int64_fromzz(coeffa);
-      ib = int64_fromzz(coeffb);
+int64_t polzvec_sprodz(const polz *a, const polz *b, size_t len) {
+  int64_t sum = 0;
+  const int threads = revac_labrador_lnp_norm_threads(len);
+
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(threads) if(threads > 1 && len >= 16 && !omp_in_parallel()) schedule(static) reduction(+:sum)
+  #endif
+  for (size_t i = 0; i < len; i++) {
+    int64_t ia, ib;
+    for(size_t j = 0; j < N; j++) {
+      ia = polz_coeff_i64_fast(a[i], j);
+      ib = polz_coeff_i64_fast(b[i], j);
 
       sum += ia * ib;
     }
@@ -1099,24 +1318,86 @@ int64_t polzvec_sprodz(const polz *a, const polz *b, size_t len) {
   return sum;
 }
 
-void polzvec_gaussian(polz *r, size_t len, unsigned int log2sd,
-                        const uint8_t seed[16], uint64_t nonce) {
-  aes128ctr_ctx state;
-  int64_t tmp;
-  int32_t *coeffs;
-  size_t i, j;
+/* Fused dot product and squared norm of an already centered response. */
+void polzvec_response_products(const polz *z, const polz *v, size_t len,
+                                int64_t *zv, int64_t *vv) {
+  int64_t dot = 0, norm = 0;
+  const int threads = revac_labrador_lnp_norm_threads(len);
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(threads) if(threads > 1 && len >= 16 && !omp_in_parallel()) schedule(static) reduction(+:dot,norm)
+  #endif
+  for(size_t i=0;i<len;i++){
+    for(size_t j=0;j<N;j++){
+      const int64_t iz = polz_coeff_i64_fast(z[i], j);
+      const int64_t iv = polz_coeff_i64_fast(v[i], j);
+      dot += iz * iv;
+      norm += iv * iv;
+    }
+  }
+  *zv = dot;
+  *vv = norm;
+}
 
-  coeffs = _malloc (N * len * sizeof(int32_t));
+/* Compute <mask+shift,shift> and <shift,shift> in one pass.  Rejection
+ * sampling needs both products; doing them separately decodes every shift
+ * coefficient twice.  The caller keeps mask and shift in their centered
+ * integer representatives, so this is exactly the protocol's z=mask+shift
+ * product without constructing z before the candidate has been accepted. */
+void polzvec_rejection_products(const polz *mask, const polz *shift,
+                                size_t len, int64_t *zv, int64_t *vv) {
+  int64_t mask_shift = 0;
+  int64_t shift_sq = 0;
+  const int threads = revac_labrador_lnp_norm_threads(len);
 
-  aes128ctr_init(&state, seed, nonce);
-  gaussian_i32(coeffs, N * len, &state, log2sd);
-
-  for (i = 0; i < len; i++) {
-    for (j = 0; j < N; j++) {
-      tmp = coeffs[i * N + j];
-      polz_setcoeff_fromint64(r[i], tmp, j);
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(threads) if(threads > 1 && len >= 16 && !omp_in_parallel()) schedule(static) reduction(+:mask_shift,shift_sq)
+  #endif
+  for (size_t i = 0; i < len; i++) {
+    int64_t imask, ishift;
+    for (size_t j = 0; j < N; j++) {
+      imask = polz_coeff_i64_fast(mask[i], j);
+      ishift = polz_coeff_i64_fast(shift[i], j);
+      mask_shift += imask * ishift;
+      shift_sq += ishift * ishift;
     }
   }
 
+  *zv = mask_shift + shift_sq;
+  *vv = shift_sq;
+}
+
+void polzvec_gaussian_scratch(polz *r, size_t len, unsigned int log2sd,
+                              const uint8_t seed[16], uint64_t nonce,
+                              int32_t *coeffs) {
+  aes128ctr_ctx state;
+  const int threads = revac_gaussian_threads(len);
+  const size_t chunks = (N * len + REVAC_GAUSSIAN_PAR_CHUNK_COEFFS - 1) /
+                        REVAC_GAUSSIAN_PAR_CHUNK_COEFFS;
+
+  if (revac_gaussian_parallel_enabled() && threads > 1 && chunks > 1) {
+    revac_gaussian_i32_parallel(coeffs, N * len, log2sd, seed, nonce,
+                                MIN(threads, (int)chunks));
+  } else {
+    aes128ctr_init(&state, seed, nonce);
+    gaussian_i32(coeffs, N * len, &state, log2sd);
+  }
+
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(threads) if(threads > 1 && len >= 16 && !omp_in_parallel()) schedule(static)
+  #endif
+  for (size_t i = 0; i < len; i++) {
+    for (size_t j = 0; j < N; j++) {
+      polz_setcoeff_fromint64(r[i], coeffs[i * N + j], j);
+    }
+  }
+}
+
+
+void polzvec_gaussian(polz *r, size_t len, unsigned int log2sd,
+                        const uint8_t seed[16], uint64_t nonce) {
+  int32_t *coeffs;
+
+  coeffs = _malloc (N * len * sizeof(int32_t));
+  polzvec_gaussian_scratch(r, len, log2sd, seed, nonce, coeffs);
   free (coeffs);
 }

@@ -46,6 +46,14 @@ typedef struct _sparsecnst{
   quadfunc quad;
   linfunc lin;
   polxvec b;
+  /* Canonical static transcript bytes produced by the Python bridge.  They
+   * let a dynamic RHS rebind reconstruct the identical Fiat-Shamir hash
+   * without converting the immutable coefficient graph back from polx. */
+  uint8_t *transcript_lin;
+  size_t transcript_lin_len;
+  uint8_t *transcript_quad;
+  size_t transcript_quad_len;
+  int borrowed;
 } sparsecnst[1];
 
 /*
@@ -80,6 +88,7 @@ typedef struct _comcnst{
   size_t nphi;
   size_t *phiw_off;
   polxvec *phi;
+  int borrowed;
 } comcnst[1];
 
 /*
@@ -94,6 +103,7 @@ typedef struct _sigmam1cnst{
   size_t len;
   int mul;
   polxvec c;
+  int borrowed;
 } sigmam1cnst[1];
 
 /*
@@ -165,6 +175,9 @@ void linfunc_free(linfunc lin);
 void linfunc_eval_add(polxvec ev, const linfunc lin, const polxvec sx); 
 
 void sparsecnst_init(sparsecnst cnst, size_t rank);
+/* Create a read-only, non-owning view.  The source must outlive out and must
+ * not be mutated while out participates in a proof reduction. */
+void sparsecnst_borrow(sparsecnst out, const sparsecnst in);
 void sparsecnst_copy(sparsecnst out, const sparsecnst in);
 void sparsecnst_copy2(sparsecnst out, const sparsecnst in, size_t maxlen);
 void sparsecnst_free(sparsecnst cnst);
@@ -179,6 +192,7 @@ void sparsecnst_aggregate_add(sparsecnst out, const sparsecnst *in,
 
 void comcnst_init(comcnst cnst, size_t rank, size_t ncom, size_t nphi, 
                   size_t maxnphi);
+void comcnst_borrow(comcnst out, const comcnst in);
 void comcnst_copy(comcnst out, const comcnst in);
 void comcnst_free(comcnst cnst);
 void comcnst_eval(polxvec ev, const comcnst cnst, const polxvec sx);
@@ -188,6 +202,7 @@ void comcnst_aggregate_add(sparsecnst out, const comcnst *in, size_t ncnst,
 
 void sigmam1cnst_init(sigmam1cnst cnst, size_t off1, size_t off2, size_t len,
                       int mul);
+void sigmam1cnst_borrow(sigmam1cnst out, const sigmam1cnst in);
 void sigmam1cnst_copy(sigmam1cnst out, const sigmam1cnst in);
 void sigmam1cnst_free(sigmam1cnst cnst);
 int sigmam1cnst_check(const sigmam1cnst cnst, const polxvec sx);

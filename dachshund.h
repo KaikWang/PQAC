@@ -8,7 +8,7 @@
 #include "proofsystem.h"
 #include "pack.h"
 
-#define DCH_MAXPARTS 150
+#define DCH_MAXPARTS PS_MAXPARTS
 #define DCH_MAXLEN 50000
 #define DCH_MAXNORMSQ PS_Q/(JL_INF_SLACK*JL_INF_SLACK+3)
 
@@ -103,6 +103,7 @@ void dch_pack_params_free(dch_pack_params pp);
 
 void dch_pack_prove(dch_pack_proof pi, const statement ist, 
                     const witness iwt, const dch_pack_params pp);
+int dch_pack_last_prove_relation_valid(void);
 int dch_pack_verify(const statement ist, const dch_pack_params pp, 
                     const dch_pack_proof pi);
 

@@ -7,6 +7,7 @@
 void ldr_tail_prove(lab_proof pi, statement ost, witness owt, 
                     const statement ist, const witness iwt, 
                     const lab_params pp);
+int ldr_tail_last_prove_valid(void);
 int ldr_tail_reduce(statement ost, const statement ist, const lab_proof pi, 
                     const lab_params pp);
 

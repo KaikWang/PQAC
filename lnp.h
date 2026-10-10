@@ -80,7 +80,7 @@ typedef struct _lnp_params {
 
   // rejection sampling 1 (masked si)
   long double sd1;     // standard deviation
-  unsigned int logsd1; // log of standard deviations sd1=1.55*2^logsd1 
+  unsigned int logsd1; // log of standard deviations sd1=1.55*2^logsd1
   long double gamma1;  // factor to increase sd (to lower repetition rate)
   long double capm1;   // repetition rate
 

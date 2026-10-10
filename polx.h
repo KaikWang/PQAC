@@ -64,6 +64,7 @@ void polxvec_challenge(polxvec r, const uint8_t seed[16], uint64_t nonce);
 
 void polx_refresh(polx r);
 void polxvec_refresh(polxvec r);
+void polxvec_exact_refresh(polxvec r);
 void polx_reduce(polx r);
 void polxvec_reduce(polxvec r);
 
@@ -90,6 +91,10 @@ void polxvec_mul_add(polxvec r, const polxvec a, const polxvec b);
 void polxvec_polx_mul_add(polxvec r, polx a, const polxvec b);
 void polxvec_sprod(polxvec r, const polxvec a, const polxvec b);
 void polxvec_sprod_add(polxvec r, const polxvec a, const polxvec b);
+void polxvec_exact_mul(polxvec r, const polxvec a, const polxvec b);
+void polxvec_exact_crt_mul(polxvec r, const polxvec a, const polxvec b);
+void polxvec_exact_mul_add(polxvec r, const polxvec a, const polxvec b);
+void polxvec_exact_sprod_add(polxvec r, const polxvec a, const polxvec b);
 size_t polxvec_sprod_extension(polxvec c, const polxvec a, const polxvec b);
 size_t polxvec_sprod_extension_add(polxvec c, const polxvec a, const polxvec b);
 size_t polxvec_collaps_add_extension(polxvec c, const polxvec a, const polxvec b, size_t off_a);
@@ -107,6 +112,8 @@ void polx_bindec(poly *r, const polx a, ssize_t stride, size_t t);
 void polxvec_bindec(poly *r, const polxvec a, ssize_t stride, size_t t);
 void polx_decompose(poly *r, const polx a, ssize_t stride, size_t t, size_t d);
 void polxvec_decompose(poly *r, const polxvec a, ssize_t stride, size_t t, size_t d);
+void polxvec_exact_decompose(poly *r, const polxvec a, ssize_t stride,
+                             size_t t, size_t d);
 void polx_reconstruct(polx r, const poly *a, ssize_t stride, size_t t, size_t d);
 void polxvec_reconstruct(polxvec r, const poly *a, ssize_t stride, size_t t, size_t d);
 

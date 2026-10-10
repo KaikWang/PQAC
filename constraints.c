@@ -4,6 +4,49 @@
 #include "polz.h"
 #include "constraints.h"
 #include "comkey.h"
+#include "revac_profile.h"
+
+static int residual_diagnostics_enabled(void){
+  const char *value = getenv("REVAC_LABRADOR_RESIDUAL_DIAG");
+  return value != NULL && value[0] != '\0' && value[0] != '0';
+}
+
+static void sparsecnst_print_residual(const polxvec ev){
+  const int64_t q = ((int64_t)1 << LOGQ) - QOFF;
+
+  for(size_t vector_index=0;vector_index<ev->len;vector_index++){
+    polxvec view;
+    polz approximate, exact;
+    zz approximate_coefficient, exact_coefficient;
+
+    polxvec_init_subvec2(view, ev, vector_index, 1, 1);
+    polzvec_frompolxvec(&approximate, view, 0, 1, 1);
+    polz_center(approximate);
+    polzvec_exact_frompolxvec(&exact, view, 0, 1, 1);
+    for(size_t coefficient=0;coefficient<N;coefficient++){
+      int64_t approximate_value, exact_value, delta;
+
+      polz_getcoeff(approximate_coefficient, approximate, coefficient);
+      polz_getcoeff(exact_coefficient, exact, coefficient);
+      approximate_value = int64_fromzz(approximate_coefficient);
+      exact_value = int64_fromzz(exact_coefficient);
+      if(approximate_value == 0 && exact_value == 0)
+        continue;
+      delta = approximate_value - exact_value;
+      fprintf(stderr,
+              "[Labrador residual 诊断] vector=%zu coeff=%zu "
+              "approx=%lld exact=%lld delta=%lld delta/q=%lld "
+              "delta%%q=%lld\n",
+              vector_index, coefficient,
+              (long long)approximate_value, (long long)exact_value,
+              (long long)delta, (long long)(delta / q),
+              (long long)(delta % q));
+      return;
+    }
+  }
+  fprintf(stderr,
+          "[Labrador residual 诊断] approximate/exact residual 均为零\n");
+}
 
 /*
   Initializes quad to have length len, while allocating enough memory to support
@@ -192,10 +235,23 @@ void linfunc_eval_add(polxvec ev, const linfunc lin, const polxvec sx){
   Initializes a zero sparse constraint, the vector b is allocated and set to 0.
 */
 void sparsecnst_init(sparsecnst cnst, size_t rank){
+  cnst->borrowed = 0;
+  cnst->transcript_lin = NULL;
+  cnst->transcript_lin_len = 0;
+  cnst->transcript_quad = NULL;
+  cnst->transcript_quad_len = 0;
   quadfunc_init(cnst->quad, 0, 0);
   linfunc_init(cnst->lin, rank, 0, 0);
   polxvec_init(cnst->b, rank, 1);
   polxvec_setzero(cnst->b, 0, 1, rank);
+}
+
+/* Create an immutable, non-owning view.  This is used only while the source
+ * statement is alive and avoids deep-copying a large static constraint
+ * prefix into a short-lived Dachshund statement. */
+void sparsecnst_borrow(sparsecnst out, const sparsecnst in){
+  memcpy(out, in, sizeof(*out));
+  out->borrowed = 1;
 }
 
 void sparsecnst_copy(sparsecnst out, const sparsecnst in){
@@ -213,9 +269,19 @@ void sparsecnst_copy2(sparsecnst out, const sparsecnst in, size_t maxlen){
 }
 
 void sparsecnst_free(sparsecnst cnst){
+  if(cnst->borrowed){
+    cnst->borrowed = 0;
+    return;
+  }
   quadfunc_free(cnst->quad);
   linfunc_free(cnst->lin);
   polxvec_free(cnst->b);
+  free(cnst->transcript_lin);
+  free(cnst->transcript_quad);
+  cnst->transcript_lin = NULL;
+  cnst->transcript_lin_len = 0;
+  cnst->transcript_quad = NULL;
+  cnst->transcript_quad_len = 0;
 }
 
 void sparsecnst_refresh(sparsecnst cnst){
@@ -276,6 +342,8 @@ int sparsecnst_check(
   else{
     check = polxvec_iszero_constcoeff(ev, 0);
   }
+  if(!check && residual_diagnostics_enabled())
+    sparsecnst_print_residual(ev);
   polxvec_free(ev);
   return check;
 }
@@ -290,62 +358,161 @@ int sparsecnst_check(
   rotation matrix is aggregated using the polynomial challenges in a and added
   to the corresponding subvector in r.
 */
-void polxvec_rotation_aggregate_add(
+static void rotation_aggregate_internal(
   polxvec r, 
   const polxvec a, 
-  const polxvec b
+  const polxvec b,
+  int batch
 )
 {
-  size_t rank, deg, off, row, col, ncol, len;
-  polxvec r_sv, a_sv, b_sv, tutl, tu, tl, tu_sv, tl_sv, tmp, tmp_sv;
-  polx x;
-  polx_monomial(x, 1, 1);
+  size_t rank, deg, len, nblocks;
+  int threads;
+  const char *lazy_value = getenv("REVAC_LABRADOR_ROTATION_LAZY_SCRATCH");
+  const int lazy_scratch = lazy_value == NULL || lazy_value[0] != '0';
 
   rank = a->len;
   deg = next2power(rank);
-  polxvec_init(tutl, 2*deg, 1);
-  polxvec_init(tmp, deg, 1);
-
-  off = 0;
   len = r->len;
-  while(len > 0){
-    ncol = MIN(deg, len);
-    polxvec_init_subvec2(b_sv, b, off, 1, deg);
-    polxvec_init_subvec2(r_sv, r, off, 1, ncol);
-    polxvec_setzero(tutl, 0, 1, 2*ncol);
-    polxvec_init_subvec2(tu, tutl, 0, 1, ncol);
-    polxvec_init_subvec2(tl, tutl, ncol, 1, ncol);
+  nblocks = (len + deg - 1) / deg;
+  threads = revac_labrador_rotation_threads(nblocks);
 
-    for(row=0;row<rank;row++){
-      polxvec_init_subvec2(tmp_sv, tmp, 0, 1, deg);
-      polxvec_init_subvec2(a_sv, a, row, 1, 1);
-      polxvec_mul(tmp_sv, a_sv, b_sv);
-                  
-      for(col=0;col<ncol;col++){
-        if(col<=row){
-          // tl[col] += tmp[row-col]
-          polxvec_init_subvec2(tl_sv, tl, col, 1, 1);
-          polxvec_init_subvec2(tmp_sv, tmp, row-col, 1, 1);
+  /* Each block reads the same challenge vector but disjoint slices of b and
+   * r.  All mutable scratch objects live inside the parallel region. */
+  #ifdef _OPENMP
+  #pragma omp parallel \
+      num_threads(threads) \
+      if(revac_labrador_rotation_parallel_enabled() && \
+         threads > 1 && nblocks >= 4 && !omp_in_parallel())
+  #endif
+  {
+    polxvec r_sv, a_sv, b_sv, b0_sv, tutl, tu, tl, tu_sv, tl_sv, tmp, tmp_sv;
+    polx x;
+    size_t block, row, col;
+    int scratch_initialized = 0;
+
+    polx_monomial(x, 1, 1);
+    if(!lazy_scratch){
+      polxvec_init(tutl, 2*deg, 1);
+      polxvec_init(tmp, deg, 1);
+      scratch_initialized = 1;
+    }
+
+    #ifdef _OPENMP
+    #pragma omp for schedule(static)
+    #endif
+    for(block=0;block<nblocks;block++){
+      const size_t off = block * deg;
+      const size_t ncol = MIN(deg, len - off);
+      int scalar_block = b->widths != NULL;
+
+      polxvec_init_subvec2(b_sv, b, off, 1, deg);
+      polxvec_init_subvec2(r_sv, r, off, 1, ncol);
+
+      /* A surprisingly common case in generated statements is an
+       * extension-ring coefficient which is a scalar: only coordinate zero
+       * of this degree-sized block is non-zero.  Expanding its full rotation
+       * matrix performs deg^2 pointwise products even though the result is
+       * simply r[j] += b[0] * a[j].  Width zero is an exact invariant for a
+       * zero polx in this representation, so this test does not inspect or
+       * approximate coefficients and does not alter the transcript.  The
+       * q96 rank-32 aggregation equalities use precisely this layout. */
+      for(col=1;scalar_block && col<deg;col++){
+        scalar_block = b->widths[(off + col) * b->stride] == 0;
+      }
+      if(scalar_block){
+        polxvec_init_subvec2(b0_sv, b, off, 1, 1);
+        polxvec_init_subvec2(a_sv, a, 0, 1, ncol);
+        polxvec_mul_add(r_sv, b0_sv, a_sv);
+        continue;
+      }
+
+      if(!scratch_initialized){
+        polxvec_init(tutl, 2*deg, 1);
+        polxvec_init(tmp, deg, 1);
+        scratch_initialized = 1;
+      }
+
+      polxvec_setzero(tutl, 0, 1, 2*ncol);
+      polxvec_init_subvec2(tu, tutl, 0, 1, ncol);
+      polxvec_init_subvec2(tl, tutl, ncol, 1, ncol);
+
+      for(row=0;row<rank;row++){
+        polxvec_init_subvec2(tmp_sv, tmp, 0, 1, deg);
+        polxvec_init_subvec2(a_sv, a, row, 1, 1);
+        polxvec_mul(tmp_sv, a_sv, b_sv);
+
+        if(batch){
+          /* Same per-coordinate additions and row order as the scalar
+           * loop, using two reversed views instead of ncol tiny calls. */
+          const size_t lower = MIN(ncol, row + 1);
+          polxvec_init_subvec2(tl_sv, tl, 0, 1, lower);
+          polxvec_init_subvec2(tmp_sv, tmp, row, -1, lower);
           polxvec_add(tl_sv, tl_sv, tmp_sv);
+          if(lower < ncol){
+            polxvec_init_subvec2(tu_sv, tu, lower, 1, ncol-lower);
+            polxvec_init_subvec2(tmp_sv, tmp, deg-1, -1, ncol-lower);
+            polxvec_add(tu_sv, tu_sv, tmp_sv);
+          }
         }
-        else{
-          // tu[col] += tmp[deg+row-col]
-          polxvec_init_subvec2(tu_sv, tu, col, 1, 1);
-          polxvec_init_subvec2(tmp_sv, tmp, deg+row-col, 1, 1);
-          polxvec_add(tu_sv, tu_sv, tmp_sv);
+        else for(col=0;col<ncol;col++){
+          if(col<=row){
+            // tl[col] += tmp[row-col]
+            polxvec_init_subvec2(tl_sv, tl, col, 1, 1);
+            polxvec_init_subvec2(tmp_sv, tmp, row-col, 1, 1);
+            polxvec_add(tl_sv, tl_sv, tmp_sv);
+          }
+          else{
+            // tu[col] += tmp[deg+row-col]
+            polxvec_init_subvec2(tu_sv, tu, col, 1, 1);
+            polxvec_init_subvec2(tmp_sv, tmp, deg+row-col, 1, 1);
+            polxvec_add(tu_sv, tu_sv, tmp_sv);
+          }
         }
       }
+      polxvec_polx_mul_add(r_sv, x, tu);
+      polxvec_add(r_sv, r_sv, tl);
     }
-    polxvec_polx_mul_add(r_sv, x, tu);
-    polxvec_add(r_sv, r_sv, tl);
-    off += deg;
-    len -= ncol;
+
+    if(scratch_initialized){
+      polxvec_free(tutl);
+      polxvec_free(tmp);
+    }
   }
-  
-  polxvec_free(tutl);
-  polxvec_free(tmp);
 }
 
+
+void polxvec_rotation_aggregate_add(polxvec r, const polxvec a,
+                                    const polxvec b)
+{
+  const char *mode = getenv("REVAC_LABRADOR_ROTATION_BATCH");
+  const char *audit = getenv("REVAC_LABRADOR_ROTATION_CHECK");
+  const int batch = mode != NULL && mode[0] == '1';
+  if(audit != NULL && audit[0] == '1'){
+    polxvec reference;
+    polxvec_init(reference, r->len, r->widths != NULL);
+    polxvec_copy(reference, r);
+    rotation_aggregate_internal(reference, a, b, 0);
+    rotation_aggregate_internal(r, a, b, 1);
+    for(size_t j=0;j<r->len;j++){
+      for(size_t k=0;k<K;k++){
+        for(size_t i=0;i<N;i++){
+          if(r->proj[k][j*r->stride]->c[i] !=
+             reference->proj[k][j]->c[i]){
+            fprintf(stderr, "rotation batch coefficient mismatch\n");
+            abort();
+          }
+        }
+      }
+      if(r->widths && r->widths[j*r->stride] != reference->widths[j]){
+        fprintf(stderr, "rotation batch width mismatch\n");
+        abort();
+      }
+    }
+    polxvec_free(reference);
+    return;
+  }
+  rotation_aggregate_internal(r, a, b, batch);
+}
 
 /*
   out += c*in, where c->len == in->lin->rank.
@@ -353,17 +520,29 @@ void polxvec_rotation_aggregate_add(
 static void sparsecnst_polxvec_mul_add(
   sparsecnst out,
   const polxvec c,
-  const sparsecnst in
+  const sparsecnst in,
+  double profile_parts[3]
 )
 {
   size_t i;
   polxvec outphi;
+  const int profile = profile_parts != NULL;
+  double started = 0.0;
 
+  if(profile) started = revac_labrador_profile_seconds();
   if(in->lin->rank == 1){
     quadfunc_polxvec_mul_add(out->quad, c, in->quad);
   }
+  if(profile) {
+    profile_parts[0] += revac_labrador_profile_seconds() - started;
+    started = revac_labrador_profile_seconds();
+  }
 
   polxvec_sprod_add(out->b, c, in->b);
+  if(profile) {
+    profile_parts[1] += revac_labrador_profile_seconds() - started;
+    started = revac_labrador_profile_seconds();
+  }
 
   for(i=0;i<in->lin->nparts;i++){
     polxvec_init_subvec2(outphi, out->lin->phi[0], in->lin->off[i], 1,
@@ -375,6 +554,7 @@ static void sparsecnst_polxvec_mul_add(
       polxvec_rotation_aggregate_add(outphi, c, in->lin->phi[i]);
     }
   }
+  if(profile) profile_parts[2] += revac_labrador_profile_seconds() - started;
 }
 
 /*
@@ -426,18 +606,26 @@ void sparsecnst_aggregate_add(
 {
   size_t i, off;
   polxvec chal_sv;
+  const int profile = revac_labrador_profile_detail_enabled() && full;
+  double profile_parts[3] = {0.0, 0.0, 0.0};
 
   off = 0;
   for(i=0;i<ncnst;i++){
     if(full){
       polxvec_init_subvec2(chal_sv, chal, off, 1, in[i]->lin->rank);
-      sparsecnst_polxvec_mul_add(out, chal_sv, in[i]);
+      sparsecnst_polxvec_mul_add(out, chal_sv, in[i],
+                                 profile ? profile_parts : NULL);
     }
     else{
       sparsecnst_scale_add(out, in[i], chalz[off]);
     }
     off += in[i]->lin->rank;
 
+  }
+  if(profile && ncnst > 0){
+    fprintf(stderr,
+            "[Labrador sparse 细分] n=%zu quad=%.6f b=%.6f phi=%.6f 秒\n",
+            ncnst, profile_parts[0], profile_parts[1], profile_parts[2]);
   }
 }
 
@@ -455,6 +643,7 @@ void comcnst_init(
 {
   size_t i;
 
+  cnst->borrowed = 0;
   cnst->rank = rank;
   polxvec_init(cnst->b, rank, 1);
 
@@ -471,6 +660,11 @@ void comcnst_init(
   for(i=0;i<ncom;i++){
     cnst->scalar[i] = 1;
   }
+}
+
+void comcnst_borrow(comcnst out, const comcnst in){
+  *out = *in;
+  out->borrowed = 1;
 }
 
 void comcnst_copy(comcnst out, const comcnst in){
@@ -492,6 +686,10 @@ void comcnst_copy(comcnst out, const comcnst in){
 
 void comcnst_free(comcnst cnst){
   size_t i;
+  if(cnst->borrowed){
+    memset(cnst, 0, sizeof(*cnst));
+    return;
+  }
   polxvec_free(cnst->b);
   free(cnst->comk_off);
   
@@ -638,6 +836,7 @@ void sigmam1cnst_init(
   int mul
 )
 {
+  cnst->borrowed = 0;
   cnst->off1 = off1;
   cnst->off2 = off2;
   cnst->len = len;
@@ -645,6 +844,11 @@ void sigmam1cnst_init(
   if(mul){
     polxvec_init(cnst->c, 1, 1);
   }
+}
+
+void sigmam1cnst_borrow(sigmam1cnst out, const sigmam1cnst in){
+  *out = *in;
+  out->borrowed = 1;
 }
 
 void sigmam1cnst_copy(sigmam1cnst out, const sigmam1cnst in){
@@ -655,6 +859,10 @@ void sigmam1cnst_copy(sigmam1cnst out, const sigmam1cnst in){
 }
 
 void sigmam1cnst_free(sigmam1cnst cnst){
+  if(cnst->borrowed){
+    memset(cnst, 0, sizeof(*cnst));
+    return;
+  }
   if(cnst->mul){
     polxvec_free(cnst->c);
     cnst->mul = 0;
@@ -848,10 +1056,21 @@ int rqcnstset_check(
 
   check = 1;
   for(i=0;i<rqc->nsparse;i++){
-    check &= sparsecnst_check(rqc->sparse[i], sxq, sxl, 1);
+    const int valid = sparsecnst_check(rqc->sparse[i], sxq, sxl, 1);
+    if(!valid && revac_labrador_profile_detail_enabled())
+      fprintf(stderr,
+              "[Labrador Rq 诊断] sparse[%zu]/%zu 失败：rank=%zu, quad=%zu, lin=%zu\n",
+              i, rqc->nsparse, rqc->sparse[i]->b->len,
+              rqc->sparse[i]->quad->len,
+              rqc->sparse[i]->lin->nparts);
+    check &= valid;
   }
   for(i=0;i<rqc->ncom;i++){
-    check &= comcnst_check(rqc->com[i], sxl);
+    const int valid = comcnst_check(rqc->com[i], sxl);
+    if(!valid && revac_labrador_profile_detail_enabled())
+      fprintf(stderr, "[Labrador Rq 诊断] commitment[%zu]/%zu 失败\n",
+              i, rqc->ncom);
+    check &= valid;
   }
   return check;
 }

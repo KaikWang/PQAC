@@ -5,6 +5,27 @@
 #include "proofsystem.h"
 #include "comkey.h"
 #include "malloc.h"
+#include "revac_profile.h"
+
+static int lab_quadg_threads(size_t work)
+{
+#ifdef _OPENMP
+  const char *value = getenv("REVAC_LABRADOR_QUADG_THREADS");
+  char *end = NULL;
+  long requested;
+
+  if(value == NULL || value[0] == '\0')
+    return revac_labrador_team_threads(work);
+  requested = strtol(value, &end, 10);
+  if(end == value || *end != '\0' || requested < 1) requested = 1;
+  if(requested > omp_get_max_threads()) requested = omp_get_max_threads();
+  if((size_t)requested > work) requested = (long)work;
+  return (int)requested;
+#else
+  (void)work;
+  return 1;
+#endif
+}
 
 void lab_proof_init(lab_proof pi, const lab_params pp){
   if(pp->compressed){
@@ -415,9 +436,24 @@ int lab_params_gen(
 )
 {
   size_t i, j, k, nn, pib, wtb, bestbits, rem, ncandidates, *candidates;
+  size_t target_nmax = 0;
   size_t decompose, maxsplit;
   lab_params *pp, *bestpp, *tmp;
   int ret;
+  const char *diag_value = getenv("REVAC_LABRADOR_PARAM_CANDIDATES");
+  const int diagnose_candidates = diag_value != NULL &&
+                                  diag_value[0] != '\0' &&
+                                  diag_value[0] != '0';
+  {
+    const char *target_value = getenv("REVAC_LABRADOR_FIRST_TARGET_NMAX");
+    if(target_value != NULL && target_value[0] != '\0'){
+      char *end = NULL;
+      unsigned long long parsed = strtoull(target_value, &end, 10);
+      if(end != target_value && *end == '\0' && parsed > 0 &&
+         parsed <= SIZE_MAX)
+        target_nmax = (size_t)parsed;
+    }
+  }
 
   assert(!compressed || !tail);
   assert(!zk || compressed);
@@ -444,7 +480,7 @@ int lab_params_gen(
     nn += st->n[i];
   }
 
-  maxsplit = compressed ? 150 : 10;
+  maxsplit = compressed ? PS_MAXPARTS : 10;
   // candidate lengths for amortization 'z'
   candidates = _malloc(st->r * maxsplit * sizeof(size_t));
   ncandidates = 0;
@@ -489,7 +525,25 @@ int lab_params_gen(
     ret = lab_params_gen_raw(*pp, &pib, &wtb, st, decompose,
                               global_norm_check, slack_norm_check);
 
-    if(!ret && pib + wtb < bestbits){
+    if(!ret && diagnose_candidates && nn >= 50000){
+      fprintf(stderr,
+              "[Labrador 参数候选] input_r=%zu nn=%zu candidate=%zu "
+              "output_r=%zu nmax=%zu proof_bits=%zu witness_bits=%zu "
+              "total_bits=%zu\n",
+              st->r, nn, candidates[i], (*pp)->r, (*pp)->nmax,
+              pib, wtb, pib + wtb);
+    }
+
+    /* The upstream selector minimizes only serialized proof plus output
+     * witness bits.  For a very wide first q88 fold, allow a deployment to
+     * cap nmax and then retain the smallest-size candidate under that cap.
+     * This changes only public Pack parameters, never the relation or its
+     * security checks.  Restrict it to high-vector-count compressed rounds so
+     * later recursive rounds keep their independently optimal split. */
+    if(!ret &&
+       (target_nmax == 0 || !compressed || st->r < 64 ||
+        (*pp)->nmax <= target_nmax) &&
+       pib + wtb < bestbits){
       bestbits = pib + wtb;
       *owtbits = wtb;
       *pibits = pib;
@@ -699,28 +753,44 @@ void lab_quadg(
   int tail
 )
 {
-  polxvec gx, sxi, sxj;
-  size_t i, j, len, gpos = 0;
-  polxvec_init(gx, 1, 1);
+  const int threads = lab_quadg_threads(r);
 
-  for(i=0;i<r;i++){
-    for(j=i;j<r;j++){
-      len = MIN(sx[i]->len, sx[j]->len);
-      polxvec_init_subvec2(sxi, sx[i], 0, 1, len);
-      polxvec_init_subvec2(sxj, sx[j], 0, 1, len);
-      polxvec_sprod(gx, sxi, sxj);
-      if(tail){
-        polzvec_frompolxvec(&gz[gpos], gx, 0, 1, 1);
-        polzvec_center(&gz[gpos], 1);
-        gpos++;
-      }
-      else{
-        polxvec_decompose(&gy[gpos], gx, 1, fg, bg);
-        gpos += fg;
+#ifdef _OPENMP
+/* The final tail contains only a few vectors.  Keep it serial: parallel
+ * pointwise accumulation here produced rare prover/verifier system-check
+ * mismatches while saving less than one team-creation interval. */
+#pragma omp parallel num_threads(threads) \
+    if(threads > 1 && r > 1 && !tail && \
+       revac_labrador_garbage_parallel_enabled() && !omp_in_parallel())
+#endif
+  {
+    polxvec gx, sxi, sxj;
+    size_t i, j, len, gpos;
+    polxvec_init(gx, 1, 1);
+
+#ifdef _OPENMP
+#pragma omp for schedule(dynamic)
+#endif
+    for(i=0;i<r;i++){
+      for(j=i;j<r;j++){
+        len = MIN(sx[i]->len, sx[j]->len);
+        polxvec_init_subvec2(sxi, sx[i], 0, 1, len);
+        polxvec_init_subvec2(sxj, sx[j], 0, 1, len);
+        polxvec_sprod(gx, sxi, sxj);
+        gpos = trimat_idx(i, j, r) * (tail ? 1 : fg);
+        if(tail){
+          /* Tail garbage is checked by an exact final system equation.
+           * Approximate CRT recovery can be off by q for large random
+           * intermediates and creates intermittent invalid proofs. */
+          polzvec_exact_frompolxvec(&gz[gpos], gx, 0, 1, 1);
+        }
+        else{
+          polxvec_decompose(&gy[gpos], gx, 1, fg, bg);
+        }
       }
     }
+    polxvec_free(gx);
   }
-  polxvec_free(gx);
 }
 
 /*
@@ -739,33 +809,44 @@ void lab_ling(
   size_t bu
 )
 {
-  polxvec hx, phi_sv, sx_sv;
-  size_t i, j, len, hpos = 0;
+  const int threads = revac_labrador_team_threads(r);
 
-  polxvec_init(hx, 1, 1);
+#ifdef _OPENMP
+#pragma omp parallel num_threads(threads) \
+    if(threads > 1 && r > 1 && revac_labrador_garbage_parallel_enabled())
+#endif
+  {
+    polxvec hx, phi_sv, sx_sv;
+    size_t i, j, len, hpos;
 
-  for(i=0;i<r;i++){
-    for(j=i;j<r;j++){
-      if(i == j){
-        polxvec_sprod(hx, phi[i], sx[i]);
+    polxvec_init(hx, 1, 1);
+
+#ifdef _OPENMP
+#pragma omp for schedule(dynamic)
+#endif
+    for(i=0;i<r;i++){
+      for(j=i;j<r;j++){
+        if(i == j){
+          polxvec_sprod(hx, phi[i], sx[i]);
+        }
+        else{
+          len = MIN(phi[i]->len, sx[j]->len);
+          polxvec_init_subvec2(phi_sv, phi[i], 0, 1, len);
+          polxvec_init_subvec2(sx_sv, sx[j], 0, 1, len);
+          polxvec_sprod(hx, phi_sv, sx_sv);
+
+          len = MIN(phi[j]->len, sx[i]->len);
+          polxvec_init_subvec2(phi_sv, phi[j], 0, 1, len);
+          polxvec_init_subvec2(sx_sv, sx[i], 0, 1, len);
+          polxvec_sprod_add(hx, phi_sv, sx_sv);
+        }
+
+        hpos = trimat_idx(i, j, r) * fu;
+        polxvec_decompose(&hy[hpos], hx, 1, fu, bu);
       }
-      else{
-        len = MIN(phi[i]->len, sx[j]->len);
-        polxvec_init_subvec2(phi_sv, phi[i], 0, 1, len);
-        polxvec_init_subvec2(sx_sv, sx[j], 0, 1, len);
-        polxvec_sprod(hx, phi_sv, sx_sv);
-
-        len = MIN(phi[j]->len, sx[i]->len);
-        polxvec_init_subvec2(phi_sv, phi[j], 0, 1, len);
-        polxvec_init_subvec2(sx_sv, sx[i], 0, 1, len);
-        polxvec_sprod_add(hx, phi_sv, sx_sv);
-      }
-
-      polxvec_decompose(&hy[hpos], hx, 1, fu, bu);
-      hpos += fu;
     }
+    polxvec_free(hx);
   }
-  polxvec_free(hx);
 }
 
 void lab_addcheck_amortization(

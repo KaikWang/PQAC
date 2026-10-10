@@ -52,6 +52,8 @@ void polz_topolx(polx r, const polz a);
 void polzvec_topolxvec(polxvec r, const polz *a, size_t off, ssize_t stride, size_t len);
 void polz_frompolx(polz r, const polx a);
 void polzvec_frompolxvec(polz *r, const polxvec a, size_t off, ssize_t stride, size_t len);
+void polzvec_exact_frompolxvec(polz *r, const polxvec a, size_t off,
+                               ssize_t stride, size_t len);
 
 void polz_add(polz r, const polz a, const polz b);
 void polzvec_add(polz *r, const polz *a, const polz *b, size_t len);
@@ -81,6 +83,13 @@ void polz_rotate(polz r, const polz a, size_t k);
 void polzvec_rotate(polz *r, const polz *a, size_t len, size_t k);
 
 void polzvec_gaussian(polz *r, size_t len, unsigned int log2sd, const uint8_t seed[16], uint64_t nonce);
+void polzvec_gaussian_scratch(polz *r, size_t len, unsigned int log2sd,
+                              const uint8_t seed[16], uint64_t nonce,
+                              int32_t *coeffs);
 int64_t polzvec_sprodz(const polz *a, const polz *b, size_t len);
+void polzvec_response_products(const polz *z, const polz *v, size_t len,
+                                int64_t *zv, int64_t *vv);
+void polzvec_rejection_products(const polz *mask, const polz *shift,
+                                size_t len, int64_t *zv, int64_t *vv);
 
 #endif

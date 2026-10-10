@@ -33,6 +33,12 @@
 // need 2 * N * PS_MAXBINLEN * JL_INF_SLACK**2 < q
 #define PS_MAXBINLEN PS_Q/(2*N*JL_INF_SLACK*JL_INF_SLACK)
 
+/* Maximum number of witness parts accepted by the Dachshund reduction and
+ * the first compressed LaBRADOR recursion round.  These limits must agree:
+ * otherwise Dachshund can emit a valid statement that Pack rejects before
+ * trying any secure parameter candidate. */
+#define PS_MAXPARTS 256
+
 // number of coefficients needed for the hardness of SIS with inf norm 1
 #define SIS1_NCOEF 32
 
@@ -72,6 +78,7 @@ void witness_copy(witness out, const witness in);
 void witness_free(witness wt);
 
 int sis_secure(size_t rank, double norm);
+void proof_hash_canonical_set(int enabled);
 void update_hash_polz(uint8_t h[16], const polz *in, size_t len);
 void commit(polxvec out, const polxvec in);
 size_t commit_add(polxvec out, const polxvec in, size_t off_comkey);

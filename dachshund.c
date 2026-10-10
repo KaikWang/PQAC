@@ -3,10 +3,98 @@
 #include "malloc.h"
 #include "comkey.h"
 #include "timing.h"
+#include "revac_profile.h"
 #include <inttypes.h>
+#include <pthread.h>
 
 #define ONE ((__int128_t) 1)
 #define MAXNINCOM 200
+
+static void dch_profile_detail(const char *label, double started){
+  if(!revac_labrador_profile_detail_enabled()) return;
+  fprintf(stderr, "[Labrador Dachshund 细分] %s：%.6f 秒\n", label,
+          revac_labrador_profile_seconds() - started);
+}
+
+static int dch_debug_verify_enabled(void){
+  const char *value = getenv("REVAC_LABRADOR_DCH_VERIFY");
+  return value != NULL && value[0] != '\0' && value[0] != '0';
+}
+
+static int dch_witness_threads(size_t work){
+#ifdef _OPENMP
+  const char *value = getenv("REVAC_LABRADOR_DCH_WITNESS_THREADS");
+  char *end = NULL;
+  long requested;
+
+  if(value == NULL || value[0] == '\0') return 1;
+  requested = strtol(value, &end, 10);
+  if(end == value || *end != '\0' || requested < 1) requested = 1;
+  if(requested > omp_get_max_threads()) requested = omp_get_max_threads();
+  if((size_t)requested > work) requested = (long)work;
+  return (int)requested;
+#else
+  (void)work;
+  return 1;
+#endif
+}
+
+static int dch_quadratic_linear_batch_enabled(void){
+#ifdef _OPENMP
+  const char *value = getenv("REVAC_LABRADOR_DCH_QUADRATIC_LINEAR_BATCH");
+  return value != NULL && value[0] != '\0' && value[0] != '0';
+#else
+  return 0;
+#endif
+}
+
+static int dch_addcheck_parallel_enabled(void){
+  const char *value = getenv("REVAC_LABRADOR_DCH_ADDCHECK_PARALLEL");
+  return value != NULL && value[0] == '1';
+}
+
+/* A generated constraint normally references every witness vector once, so
+ * its linear parts occupy disjoint slices of the flattened witness.  Verify
+ * that invariant before scheduling parts concurrently; the generic API still
+ * permits repeated/overlapping parts and must retain serial accumulation for
+ * those statements. */
+static int dch_linear_parts_disjoint(const sparsecnst c){
+  size_t i, j;
+
+  for(i=0;i<c->lin->nparts;i++){
+    const size_t begin_i = c->lin->off[i];
+    const size_t end_i = begin_i + c->lin->phi[i]->len;
+    for(j=i+1;j<c->lin->nparts;j++){
+      const size_t begin_j = c->lin->off[j];
+      const size_t end_j = begin_j + c->lin->phi[j]->len;
+      if(begin_i < end_j && begin_j < end_i) return 0;
+    }
+  }
+  return 1;
+}
+
+static void dch_debug_witness_prefix(const char *label, const witness derived,
+                                     const witness original){
+  size_t i, j, nn = 0;
+
+  if(!dch_debug_verify_enabled()) return;
+  for(i=0;i<original->r;i++) nn += original->n[i];
+  for(i=0;i<nn;i++){
+    for(j=0;j<N;j++){
+      if(derived->s[0][i]->c[j] != original->s[0][i]->c[j]){
+        fprintf(stderr,
+                "[Labrador Dachshund 诊断] %s witness 前缀失配："
+                "poly=%zu, coeff=%zu, derived=%d, original=%d\n",
+                label, i, j, derived->s[0][i]->c[j],
+                original->s[0][i]->c[j]);
+        return;
+      }
+    }
+  }
+  fprintf(stderr,
+          "[Labrador Dachshund 诊断] %s witness 前缀一致：%zu polynomials\n",
+          label, nn);
+}
 
 static void dch_params_init(dch_params pp, size_t maxr, size_t nexact){
   pp->nexact = nexact;
@@ -1061,12 +1149,15 @@ static void dch_statement_init(
   idx_ost = 0;
   for(i=0;i<ist->rqcnst->nsparse;i++){
     if(ist->rqcnst->sparse[i]->quad->len > 0) continue;
-
-    sparsecnst_copy(ost->rqcnst->sparse[idx_ost], ist->rqcnst->sparse[i]);
+    sparsecnst_borrow(ost->rqcnst->sparse[idx_ost],
+                      ist->rqcnst->sparse[i]);
     idx_ost++;
   }
   for(i=0;i<ist->rqcnst->ncom;i++){
-    comcnst_copy(ost->rqcnst->com[i], ist->rqcnst->com[i]);
+    /* The resident input statement owns this immutable public prefix.  The
+     * derived Dachshund statement only appends new commitment checks, so a
+     * read-only view avoids cloning large public phi vectors per request. */
+    comcnst_borrow(ost->rqcnst->com[i], ist->rqcnst->com[i]);
   }
   ost->rqcnst->sparse_nchal = ist->rqcnst->sparse_nchal + rq_nsparse;
   ost->rqcnst->com_nchal = ist->rqcnst->com_nchal;
@@ -1083,10 +1174,17 @@ static void dch_statement_init(
                  ist->zqcnst->nsigmam1 + zq_nsigma + pp->nbin_merge,
                  ist->zqcnst->nint);
   for(i=0;i<ist->zqcnst->nsparse;i++){
-    sparsecnst_copy(ost->zqcnst->sparse[i], ist->zqcnst->sparse[i]);
+    /* The input statement is resident for the whole Pack call and this
+     * prefix is never mutated by dch_addchecks().  Borrow it exactly as the
+     * immutable Rq prefix above instead of reallocating and copying every
+     * coefficient for every proof and verification.  Derived Dachshund
+     * checks are appended after this prefix and remain owned by ost. */
+    sparsecnst_borrow(ost->zqcnst->sparse[i],
+                      ist->zqcnst->sparse[i]);
   }
   for(i=0;i<ist->zqcnst->nsigmam1;i++){
-    sigmam1cnst_copy(ost->zqcnst->sigmam1[i], ist->zqcnst->sigmam1[i]);
+    sigmam1cnst_borrow(ost->zqcnst->sigmam1[i],
+                       ist->zqcnst->sigmam1[i]);
   }
   for(i=0;i<ist->zqcnst->nint;i++){
     intcnst_copy(ost->zqcnst->intc[i], ist->zqcnst->intc[i]);
@@ -1330,8 +1428,12 @@ static void dch_addcheck_quad_left(
       for(k=0;k<ist->rqcnst->sparse[i]->quad->len;k++){
         idx_left = ist->rqcnst->sparse[i]->quad->rows[k];
         off_orig = off_map[idx_left];
-        polxvec_polx_mul(chalx_times_coeff, 
-                         ist->rqcnst->sparse[i]->quad->coeffs[k], chalx_rot);
+        {
+          polxvec coeff;
+          polxvec_init_frompolx(
+              coeff, ist->rqcnst->sparse[i]->quad->coeffs[k]);
+          polxvec_exact_mul(chalx_times_coeff, coeff, chalx_rot);
+        }
         for(l=j;l<ist->n[idx_left];l+=rank){
           sparsecnst_init(c[idx_cnst], 1);
           linfunc_init(c[idx_cnst]->lin, 1, pp->digits_quad_left+1, 
@@ -1361,6 +1463,23 @@ static void dch_addcheck_quad_left(
 
   polxvec_free(chalx_rot);
   polxvec_free(chalx_times_coeff);
+}
+
+struct dch_quad_left_job {
+  sparsecnst *out;
+  const struct _dch_params *params;
+  const struct _statement *input;
+  const size_t *off_map;
+  polxvec_ptr challenge;
+};
+
+static void *dch_quad_left_thread(void *arg){
+  struct dch_quad_left_job *job = arg;
+  const double started = revac_labrador_profile_seconds();
+  dch_addcheck_quad_left(job->out, job->params, job->input,
+                         job->off_map, job->challenge);
+  dch_profile_detail("addchecks quadratic-left 关系", started);
+  return NULL;
 }
 
 static void dch_addcheck_quad_right(
@@ -1409,7 +1528,7 @@ static void dch_addcheck_quadratic(
 )
 {
   size_t i, j, off_chalx, rank, idx_left, idx_right, nparts_left;
-  polxvec chalx_sv, outphi;
+  polxvec chalx_sv;
   sparsecnst *in;
   int64_t s, base = ONE << pp->base_quad_left;
 
@@ -1451,19 +1570,46 @@ static void dch_addcheck_quadratic(
 
     polxvec_sprod_add(c->b, chalx_sv, (*in)->b);
 
-    for(j=0;j<(*in)->lin->nparts;j++){
-      polxvec_init_subvec2(outphi, c->lin->phi[0], (*in)->lin->off[j], 1,
-                           (*in)->lin->phi[j]->len);
-      if(rank == 1){
-        polxvec_mul_add(outphi, chalx_sv, (*in)->lin->phi[j]);
+    if(dch_quadratic_linear_batch_enabled() &&
+       dch_linear_parts_disjoint(*in)){
+      const int threads = revac_labrador_team_threads((*in)->lin->nparts);
+      #ifdef _OPENMP
+      #pragma omp parallel for num_threads(threads) \
+          if(threads > 1 && (*in)->lin->nparts >= 2 && !omp_in_parallel()) \
+          schedule(dynamic, 1)
+      #endif
+      for(j=0;j<(*in)->lin->nparts;j++){
+        polxvec outphi;
+        polxvec_init_subvec2(outphi, c->lin->phi[0], (*in)->lin->off[j], 1,
+                             (*in)->lin->phi[j]->len);
+        if(rank == 1)
+          polxvec_mul_add(outphi, chalx_sv, (*in)->lin->phi[j]);
+        else
+          polxvec_rotation_aggregate_add(
+              outphi, chalx_sv, (*in)->lin->phi[j]);
       }
-      else{
-        polxvec_rotation_aggregate_add(outphi, chalx_sv, (*in)->lin->phi[j]);
+    }
+    else{
+      for(j=0;j<(*in)->lin->nparts;j++){
+        polxvec outphi;
+        polxvec_init_subvec2(outphi, c->lin->phi[0], (*in)->lin->off[j], 1,
+                             (*in)->lin->phi[j]->len);
+        if(rank == 1)
+          polxvec_mul_add(outphi, chalx_sv, (*in)->lin->phi[j]);
+        else
+          polxvec_rotation_aggregate_add(
+              outphi, chalx_sv, (*in)->lin->phi[j]);
       }
     }
 
     off_chalx += rank;
   }
+
+  /* All preceding products are exact residues in the six internal CRT
+   * primes.  Canonicalize only the completed aggregate instead of performing
+   * a costly CRT round-trip after every source term. */
+  polxvec_exact_refresh(c->b);
+  polxvec_exact_refresh(c->lin->phi[0]);
 
 }
 
@@ -1479,24 +1625,44 @@ static void dch_addchecks(
 )
 {
   size_t idx_rqsparse = ist->rqcnst->nsparse - pp->nquad;
+  double profile_started = revac_labrador_profile_seconds();
+
   dch_addcheck_commit(&ost->rqcnst->com[ist->rqcnst->ncom], pp, pi);
+  dch_profile_detail("addchecks commitment 关系", profile_started);
   if(pp->nexact > 0){
+    profile_started = revac_labrador_profile_seconds();
     dch_addcheck_lifts_zero_coeff(&ost->zqcnst->sparse[ist->zqcnst->nsparse], pp);
     dch_addcheck_norms(&ost->rqcnst->sparse[idx_rqsparse], 
                        pp, ist, chalx_exact);
     idx_rqsparse += pp->nexact_merge;
     dch_addcheck_sigma(&ost->zqcnst->sigmam1[ist->zqcnst->nsigmam1], pp, ist,
                        chalx_exact);
+    dch_profile_detail("addchecks exact norm/sigma 关系", profile_started);
   }
   if(pp->nquad > 0){
-    dch_addcheck_quad_left(&ost->rqcnst->sparse[idx_rqsparse], pp, ist, off_map,
-                           chalx_quad);
-    idx_rqsparse += pp->len_quad;
-    dch_addcheck_quad_right(&ost->rqcnst->sparse[idx_rqsparse], pp, ist, 
-                            off_map);
-    idx_rqsparse += pp->len_quad;
-    dch_addcheck_quadratic(ost->rqcnst->sparse[idx_rqsparse], pp, ist,
+    const size_t left = idx_rqsparse;
+    const size_t right = left + pp->len_quad;
+    const size_t aggregate = right + pp->len_quad;
+    pthread_t left_thread;
+    struct dch_quad_left_job left_job = {
+      .out = &ost->rqcnst->sparse[left], .params = pp, .input = ist,
+      .off_map = off_map, .challenge = chalx_quad,
+    };
+    const int parallel = dch_addcheck_parallel_enabled() &&
+                         pthread_create(&left_thread, NULL,
+                                        dch_quad_left_thread, &left_job) == 0;
+    if(!parallel){
+      dch_quad_left_thread(&left_job);
+    }
+    profile_started = revac_labrador_profile_seconds();
+    dch_addcheck_quad_right(&ost->rqcnst->sparse[right], pp, ist, off_map);
+    dch_profile_detail("addchecks quadratic-right 关系", profile_started);
+    profile_started = revac_labrador_profile_seconds();
+    dch_addcheck_quadratic(ost->rqcnst->sparse[aggregate], pp, ist,
                            chalx_quad, nn);
+    dch_profile_detail("addchecks quadratic 聚合关系", profile_started);
+    if(parallel) pthread_join(left_thread, NULL);
+    idx_rqsparse = aggregate;
   }
 }
 
@@ -1509,8 +1675,8 @@ void dch_prove(
   const dch_params pp
 )
 {
-  size_t i, j, k, idx, idx_merge, nbits, off_exact, kappa_max, nn, off, len;
-  size_t rank, quad1, quad2, off_chal, *off_map;
+  size_t i, j, idx, idx_merge, nbits, off_exact, kappa_max, nn, off, len;
+  size_t rank, quad1, off_chal, *off_map;
   uint64_t normsq;
   int64_t powers64[N], bufbits[pp->randlen*N];
   double width_exact, width_powers;
@@ -1518,7 +1684,7 @@ void dch_prove(
   polz liftz;
   polxvec sigma1d, lift1d, powers, tx, incom, midcom, chalx_exact, chalx_quad;
   polxvec sx, *exact, *exact_merge, *sigma, *diff, *lift, *liftdec;
-  polxvec quad_left, quad_agg, chalx_times_coeff;
+  double profile_started = revac_labrador_profile_seconds();
 
   dch_comkey_init(pp);
   dch_statement_init(ost, ist, pp);
@@ -1544,6 +1710,10 @@ void dch_prove(
   if(pp->nquad > 0){
     polxvec_frompolyvec(sx, iwt->s[0], 1, nn, 1);
   }
+
+  dch_profile_detail("初始化、statement/witness 布局与输入 CRT 转换",
+                     profile_started);
+  profile_started = revac_labrador_profile_seconds();
 
   if(pp->nexact > 0){
     polxvec_init(sigma1d, pp->len_exact_total, 1);
@@ -1606,6 +1776,9 @@ void dch_prove(
     off_exact += iwt->n[idx];
   }
 
+  dch_profile_detail("exact-norm 辅助见证", profile_started);
+  profile_started = revac_labrador_profile_seconds();
+
   if(pp->randlen > 0){
     randombits64(bufbits, pp->randlen * N);
     polyvec_fromint64vec(&sout[pp->off_rand], bufbits, 1, pp->randlen, 1, NULL);
@@ -1648,6 +1821,9 @@ void dch_prove(
   polzvec_frompolxvec(pi->com, tx, 0, 1, pp->kappa_outer);
   update_hash_polz(ost->h, pi->com, pp->kappa_outer);
 
+  dch_profile_detail("三层 commitment 与分解", profile_started);
+  profile_started = revac_labrador_profile_seconds();
+
   if(pp->nexact > 0){
     polxvec_init(chalx_exact, pp->nexact, 1);
     sample_chalx_aggregate(chalx_exact, ost->h);
@@ -1659,9 +1835,18 @@ void dch_prove(
     polxvec_init_subvec(chalx_exact, chalx_exact, 0, 1, 0);
   }
 
+  dch_profile_detail("exact sigma 聚合与分解", profile_started);
+  profile_started = revac_labrador_profile_seconds();
+
   if(pp->nquad > 0){
-    polxvec_init(quad_agg, pp->quad_maxrank, 1);
-    polxvec_init(chalx_times_coeff, pp->quad_maxrank, 1);
+    size_t term = 0;
+    size_t *term_data = _malloc(4 * pp->quad_nterms * sizeof(size_t));
+    size_t *term_sparse = term_data;
+    size_t *term_index = &term_data[pp->quad_nterms];
+    size_t *term_off = &term_data[2 * pp->quad_nterms];
+    size_t *term_chal_off = &term_data[3 * pp->quad_nterms];
+    const int witness_threads = dch_witness_threads(pp->quad_nterms);
+
     polxvec_init(chalx_quad, pp->quad_sumranks, 1);
     sample_chalx_aggregate(chalx_quad, ost->h);
 
@@ -1670,40 +1855,74 @@ void dch_prove(
     for(i=0;i<ist->rqcnst->nsparse;i++){
       len = ist->rqcnst->sparse[i]->quad->len;
       if(len == 0) continue;
-
       rank = ist->rqcnst->sparse[i]->b->len;
-      polxvec_init_subvec(chalx_quad, chalx_quad, off_chal, 1, rank);
-      polxvec_init_subvec(chalx_times_coeff, chalx_times_coeff, 0, 1, rank);
       for(j=0;j<len;j++){
         quad1 = ist->rqcnst->sparse[i]->quad->rows[j];
-        quad2 = ist->rqcnst->sparse[i]->quad->cols[j];
-
-        polyvec_copy(&sout[pp->off_quad_right+off], iwt->s[quad2], 1, 1, 
-                     iwt->n[quad2]);
-
-        polxvec_polx_mul(chalx_times_coeff, ist->rqcnst->sparse[i]->quad->coeffs[j],
-                         chalx_quad);
-        polxvec_init_subvec(quad_agg, quad_agg, 0, 1, rank);
-        
-        for(k=0;k<iwt->n[quad1];k+=rank){
-          polxvec_init_subvec(quad_left, sx, off_map[quad1] + k, 1, rank);
-          polxvec_setzero(quad_agg, 0, 1, rank);
-          polxvec_rotation_aggregate_add(quad_agg, chalx_times_coeff, quad_left);
-
-          polxvec_decompose(&sout[pp->off_quad_left+off], quad_agg, 
-                            pp->len_quad, pp->digits_quad_left,
-                            pp->base_quad_left);
-          off += rank;
-        }
+        term_sparse[term] = i;
+        term_index[term] = j;
+        term_off[term] = off;
+        term_chal_off[term] = off_chal;
+        off += iwt->n[quad1];
+        term++;
       }
       off_chal += rank;
     }
-    polxvec_free(quad_agg);
-    polxvec_free(chalx_times_coeff);
+
+    #ifdef _OPENMP
+    #pragma omp parallel for num_threads(witness_threads) \
+        if(witness_threads > 1 && pp->quad_nterms >= 2 && \
+           !omp_in_parallel()) schedule(dynamic)
+    #endif
+    for(term=0;term<pp->quad_nterms;term++){
+      const size_t sparse_idx = term_sparse[term];
+      const size_t quad_idx = term_index[term];
+      const size_t out_off = term_off[term];
+      const size_t chal_off = term_chal_off[term];
+      const size_t local_rank = ist->rqcnst->sparse[sparse_idx]->b->len;
+      const size_t local_quad1 =
+          ist->rqcnst->sparse[sparse_idx]->quad->rows[quad_idx];
+      const size_t local_quad2 =
+          ist->rqcnst->sparse[sparse_idx]->quad->cols[quad_idx];
+      polxvec local_chal, local_quad_left, local_quad_agg;
+      polxvec local_chal_times_coeff;
+
+      polyvec_copy(&sout[pp->off_quad_right + out_off],
+                   iwt->s[local_quad2], 1, 1, iwt->n[local_quad2]);
+      polxvec_init_subvec2(local_chal, chalx_quad, chal_off, 1, local_rank);
+      polxvec_init(local_chal_times_coeff, local_rank, 1);
+      polxvec_polx_mul(
+          local_chal_times_coeff,
+          ist->rqcnst->sparse[sparse_idx]->quad->coeffs[quad_idx],
+          local_chal);
+      polxvec_init(local_quad_agg, local_rank, 1);
+
+      for(size_t local_off=0;local_off<iwt->n[local_quad1];
+          local_off+=local_rank){
+        polxvec_init_subvec2(local_quad_left, sx,
+                             off_map[local_quad1] + local_off,
+                             1, local_rank);
+        polxvec_setzero(local_quad_agg, 0, 1, local_rank);
+        polxvec_rotation_aggregate_add(local_quad_agg,
+                                       local_chal_times_coeff,
+                                       local_quad_left);
+        polxvec_decompose(
+            &sout[pp->off_quad_left + out_off + local_off], local_quad_agg,
+            pp->len_quad, pp->digits_quad_left, pp->base_quad_left);
+      }
+      polxvec_free(local_quad_agg);
+      polxvec_free(local_chal_times_coeff);
+    }
+    free(term_data);
   }
   polxvec_init_subvec(chalx_quad, chalx_quad, 0, 1, 0);
 
+  dch_profile_detail("quadratic 辅助见证", profile_started);
+  profile_started = revac_labrador_profile_seconds();
+
   dch_addchecks(ost, pp, ist, pi, chalx_exact, chalx_quad, off_map, nn);
+
+  dch_profile_detail("派生 verifier 约束", profile_started);
+  profile_started = revac_labrador_profile_seconds();
 
   // free
 
@@ -1723,6 +1942,8 @@ void dch_prove(
   polxvec_free(midcom);
   free(off_map);
   free(exact);
+
+  dch_profile_detail("临时对象清理", profile_started);
 }
 
 void dch_reduce(
@@ -1734,6 +1955,7 @@ void dch_reduce(
 {
   size_t i, *off_map, nn;
   polxvec chalx_exact, chalx_quad;
+  double profile_started = revac_labrador_profile_seconds();
 
   dch_comkey_init(pp);
   dch_statement_init(ost, ist, pp);
@@ -1760,7 +1982,13 @@ void dch_reduce(
     sample_chalx_aggregate(chalx_quad, ost->h);
   }
 
+  dch_profile_detail("Verify 初始化与挑战派生", profile_started);
+  profile_started = revac_labrador_profile_seconds();
+
   dch_addchecks(ost, pp, ist, pi, chalx_exact, chalx_quad, off_map, nn);
+
+  dch_profile_detail("Verify 派生约束", profile_started);
+  profile_started = revac_labrador_profile_seconds();
 
   if(pp->nexact > 0){
     polxvec_free(chalx_exact);
@@ -1770,6 +1998,7 @@ void dch_reduce(
   }
 
   free(off_map);
+  dch_profile_detail("Verify 临时对象清理", profile_started);
 }
 
 void dch_pack_proof_free(dch_pack_proof pi){
@@ -1829,6 +2058,12 @@ void dch_pack_params_free(dch_pack_params pp){
   pack_params_free(pp->pp_pack);
 }
 
+static _Thread_local int dch_last_prove_relation_valid = 1;
+
+int dch_pack_last_prove_relation_valid(void) {
+  return dch_last_prove_relation_valid;
+}
+
 void dch_pack_prove(
   dch_pack_proof pi, 
   const statement ist, 
@@ -1839,19 +2074,55 @@ void dch_pack_prove(
   statement st_pack;
   witness wt_pack;
   timing time;
+  const int profile = revac_labrador_profile_enabled();
+  double profile_started;
+
+  dch_last_prove_relation_valid = 1;
 
   timing_start(&time, "Dachshund Prover");
+  if (profile) profile_started = revac_labrador_profile_seconds();
+
+  if(dch_debug_verify_enabled()){
+    fprintf(stderr, "[Labrador Dachshund 诊断] 输入关系在 dch_prove 前：%s\n",
+            verify(ist, iwt) ? "通过" : "失败");
+  }
 
   dch_prove(pi->pi_dch, st_pack, wt_pack, ist, iwt, pp->pp_dch);
 
+  if(dch_debug_verify_enabled()){
+    fprintf(stderr, "[Labrador Dachshund 诊断] 输入关系在 dch_prove 后：%s\n",
+            verify(ist, iwt) ? "通过" : "失败");
+    dch_debug_witness_prefix("compile_bincnst 前", wt_pack, iwt);
+    fprintf(stderr, "[Labrador Dachshund 诊断] binary 编译前派生关系明文校验：%s\n",
+            verify(st_pack, wt_pack) ? "通过" : "失败");
+  }
+
   compile_bincnst(st_pack, wt_pack);
+
+  if(dch_debug_verify_enabled()){
+    dch_debug_witness_prefix("compile_bincnst 后", wt_pack, iwt);
+    fprintf(stderr, "[Labrador Dachshund 诊断] binary 编译后派生关系明文校验：%s\n",
+            verify(st_pack, wt_pack) ? "通过" : "失败");
+  }
+
+  if (profile) {
+    fprintf(stderr, "[Labrador 原生计时] Dachshund 约束归约：%.6f 秒\n",
+            revac_labrador_profile_seconds() - profile_started);
+  }
 
   timing_end(&time);
   timing_print(&time, 1);
 
   timing_start(&time, "Pack Prover");
+  if (profile) profile_started = revac_labrador_profile_seconds();
 
   pack_prove(pi->pi_pack, st_pack, wt_pack, pp->pp_pack);
+  if (!pack_last_prove_relation_valid()) dch_last_prove_relation_valid = 0;
+
+  if (profile) {
+    fprintf(stderr, "[Labrador 原生计时] Pack 总阶段：%.6f 秒\n",
+            revac_labrador_profile_seconds() - profile_started);
+  }
 
   timing_end(&time);
   timing_print(&time, 1);
@@ -1869,19 +2140,33 @@ int dch_pack_verify(
   int ret;
   statement st_pack;
   timing time;
+  const int profile = revac_labrador_profile_enabled();
+  double profile_started;
 
   timing_start(&time, "Dachshund Verifier");
+  if (profile) profile_started = revac_labrador_profile_seconds();
 
   dch_reduce(st_pack, ist, pi->pi_dch, pp->pp_dch);
 
   compile_bincnst(st_pack, NULL);
 
+  if (profile) {
+    fprintf(stderr, "[Labrador 原生计时] Verify Dachshund 约束归约：%.6f 秒\n",
+            revac_labrador_profile_seconds() - profile_started);
+  }
+
   timing_end(&time);
   timing_print(&time, 1);
 
   timing_start(&time, "Pack Verifier");
+  if (profile) profile_started = revac_labrador_profile_seconds();
 
   ret = pack_verify(st_pack, pp->pp_pack, pi->pi_pack);
+
+  if (profile) {
+    fprintf(stderr, "[Labrador 原生计时] Pack Verify 总阶段：%.6f 秒\n",
+            revac_labrador_profile_seconds() - profile_started);
+  }
 
   timing_end(&time);
   timing_print(&time, 1);

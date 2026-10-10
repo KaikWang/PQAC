@@ -9,6 +9,7 @@
 #include "polz.h"
 #include "randombytes.h"
 #include "rejection.h"
+#include "revac_profile.h"
 
 #include <assert.h>
 #include <math.h>
@@ -33,6 +34,7 @@
 //#define DEBUG 0
 
 #define GTAILBND 14 // gaussian tail bound
+
 // extra bits beyond logsdp for yhat decomposition:
 // sdp = 1.55*2^logsdp, max coeff = GTAILBND*sdp = 14*1.55*2^logsdp
 // ceil(log2(14*1.55)) + 1 (sign) = 5 + 1 = 6
@@ -162,6 +164,9 @@ static void comcnst_eval_(polxvec ev, const comcnst cnst, const polxvec sx){
 
 static void _get_params_rejstd (long double *capm, unsigned int *log2sd, long double *sd,
                                 long double *gamma, long double t);
+static void _get_params_rejstd_z1(long double *capm, unsigned int *log2sd,
+                                  long double *sd, long double *gamma,
+                                  long double t);
 static void _get_params_rejsgnleak (long double *capm, unsigned int *log2sd, long double *sd,
                                     long double *gamma, long double t);
 static void lnp_sample_chalx_armortize(polx *c, uint8_t h[16]);
@@ -327,6 +332,107 @@ ret:
     return reject;
 }
 
+static void lnp_compute_g0(polxvec g0, polxvec scratch,
+                           const sparsecnst finalcnst,
+                           const polxvec yxq[]) {
+    size_t i, row, col;
+    polx *aij;
+
+    polxvec_setzero(g0, 0, 1, 1);
+    for (i = 0; i < finalcnst->quad->len; i++) {
+        row = finalcnst->quad->rows[i];
+        col = finalcnst->quad->cols[i];
+        aij = &finalcnst->quad->coeffs[i];
+        polxvec_sprod(scratch, yxq[row], yxq[col]);
+        polxvec_refresh(scratch);
+        polxvec_polx_mul_add(g0, aij[0], scratch);
+        polxvec_refresh(g0);
+    }
+}
+
+static void lnp_compute_g1(polxvec g1, polxvec scratch,
+                           const sparsecnst finalcnst,
+                           const polxvec yxq[], const polxvec sxq[],
+                           const polxvec yxl, size_t linear_len) {
+    polxvec linear;
+    size_t i, row, col;
+    polx *aij;
+
+    polxvec_setzero(g1, 0, 1, 1);
+    polxvec_init_subvec2(linear, finalcnst->lin->phi[0], 0, 1, linear_len);
+    polxvec_sprod(g1, linear, yxl);
+    polxvec_refresh(g1);
+    for (i = 0; i < finalcnst->quad->len; i++) {
+        row = finalcnst->quad->rows[i];
+        col = finalcnst->quad->cols[i];
+        aij = &finalcnst->quad->coeffs[i];
+        polxvec_sprod(scratch, yxq[row], sxq[col]);
+        polxvec_refresh(scratch);
+        polxvec_sprod_add(scratch, sxq[row], yxq[col]);
+        polxvec_refresh(scratch);
+        polxvec_polx_mul_add(g1, aij[0], scratch);
+        polxvec_refresh(g1);
+    }
+}
+
+/* Response addition needs coefficient form for rejection sampling.  Avoid
+ * converting the already sampled mask into NTT form and back.  Mode 2 audits
+ * against the original path on the same masks and challenges. */
+static void lnp_response_add(polz *mask, polz *shift, polxvec shiftx,
+                             polxvec scratch, size_t len) {
+    const char *value = getenv("REVAC_LABRADOR_LNP_RESPONSE_ADD");
+    const int mode = value == NULL ? 0 : atoi(value);
+    polz *reference = NULL;
+    if(mode == 0 || mode == 2){
+        polzvec_topolxvec(scratch, mask, 0, 1, len);
+        polxvec_add(scratch, scratch, shiftx);
+    }
+    polzvec_frompolxvec(shift, shiftx, 0, 1, len);
+    polzvec_center(shift, len);
+    if(mode == 2){
+        reference = _aligned_alloc(64, len * sizeof(polz));
+        polzvec_frompolxvec(reference, scratch, 0, 1, len);
+        polzvec_center(reference, len);
+    }
+    if(mode == 0)
+        polzvec_frompolxvec(mask, scratch, 0, 1, len);
+    else
+        polzvec_add(mask, mask, shift, len);
+    polzvec_center(mask, len);
+    if(reference != NULL){
+        for(size_t i=0;i<len;i++)
+            for(size_t j=0;j<N;j++){
+                zz a, b;
+                polz_getcoeff(a, mask[i], j);
+                polz_getcoeff(b, reference[i], j);
+                if(int64_fromzz(a) != int64_fromzz(b)){
+                    fprintf(stderr, "LNP response addition mismatch\n");
+                    abort();
+                }
+            }
+        free(reference);
+    }
+}
+
+/* Operate on the already centered response: never replace it with the
+ * uncentered mask+shift identity, which fails across a modular boundary. */
+static void lnp_response_products(const polz *z, const polz *v, size_t len,
+                                   int64_t *zv, int64_t *vv) {
+    const char *mode = getenv("REVAC_LABRADOR_LNP_REJECTION_PRODUCTS");
+    if(mode == NULL || mode[0] == '0'){
+        *zv = polzvec_sprodz(z, v, len);
+        *vv = polzvec_sprodz(v, v, len);
+        return;
+    }
+    polzvec_response_products(z, v, len, zv, vv);
+    if(mode[0] == '2' &&
+       (*zv != polzvec_sprodz(z, v, len) ||
+        *vv != polzvec_sprodz(v, v, len))){
+        fprintf(stderr, "LNP response products mismatch\n");
+        abort();
+    }
+}
+
 void lnp_prove(lnp_proof pi, statement ost, witness owt, const statement ist, const witness iwt, const lnp_params pp) {
     //__attribute__((aligned(64))) uint8_t hashbuf[64 + QBYTES * 256 + 24];
     polz v0[LNP_NPROJ * 256 / N];
@@ -372,23 +478,55 @@ void lnp_prove(lnp_proof pi, statement ost, witness owt, const statement ist, co
     polz projz[256 / N];
     size_t maxtmplen, v0off, umhat_off, umaskhatlen, yhatlen, tvv0len;
 
-    polxvec wsx, y1sx, y2sx, wvx, y1vx, y2vx, u5vecx, capu5, y2sx_bak;
+    polxvec y1sx, y1vx, y2vx, u5vecx, capu5, y2sx_bak;
+    polxvec wsx_store, wvx_store;
     polxvec z1x, z2x, csvtildex, crsvx, capa2s, capa2v;
     polxvec src_sv, dst_sv; // scatter/gather views for merged-layout copies
     polxvec ck_sv, s_sv;    // views for the split A1 commitment calls
     polxvec wsy1, wvy1;
-    polxvec g0, g1, u, v, sp, yxq[7];
-    polx *aij;
-    size_t row, col;
+    polxvec g0, g1, u, v, sp0, sp1, yxq[7];
     size_t s123_len, s45_len; // common sub-block lengths
     size_t ck_off; // running comkey offset within the split A1
     size_t stride, z1lo_out, z1_pos; // z1 decomposition helpers
     polz *csvtilde;
     polz *crsv;
+    int32_t *gaussian_scratch;
+    size_t gaussian_scratch_len;
+    const int profile = revac_labrador_profile_enabled();
+    size_t loop1_attempts = 0, loop2_outer_attempts = 0, loop2_inner_attempts = 0;
+    size_t reject_projection = 0, reject_z = 0, reject_z2 = 0, reject_z1 = 0;
+    double profile_total_started = 0.0, profile_attempt_started = 0.0;
+    double profile_section_started = 0.0, profile_final_started = 0.0;
+    double stage1_seconds = 0.0, static_seconds = 0.0;
+    double outer_seconds = 0.0, inner_seconds = 0.0;
+    double outer_gauss_seconds = 0.0, outer_s_seconds = 0.0;
+    double outer_v_seconds = 0.0, outer_g_seconds = 0.0;
+    double outer_u_seconds = 0.0, outer_part_started = 0.0;
+    double z2_seconds = 0.0, z1_seconds = 0.0, final_seconds = 0.0;
     uint64_t mask;
+
+    if (profile) {
+        long double accept1 = 1.0L / pp->capm1;
+        unsigned long p99_attempts = 1;
+
+        profile_total_started = revac_labrador_profile_seconds();
+        if (accept1 < 1.0L) {
+            p99_attempts = (unsigned long)ceill(
+                logl(0.01L) / logl(1.0L - accept1));
+        }
+        fprintf(stderr,
+                "[Labrador 原生参数] z1 离散 sigma：logsd1=%u、sigma1=%.2Lf、gamma1=%.4Lf、M1=%.4Lf、理论P99外层尝试<=%lu\n",
+                pp->logsd1, pp->sd1,
+                pp->gamma1, pp->capm1, p99_attempts);
+    }
 
     csvtilde = _aligned_alloc (64, (pp->stildelen + pp->vtildelen) * sizeof(polz));
     crsv = _aligned_alloc (64, (pp->rslen + pp->rvlen) * sizeof(polz));
+    gaussian_scratch_len = MAX(pp->stildelen + pp->vtildelen,
+                               pp->rslen + pp->rvlen);
+    gaussian_scratch_len = MAX(gaussian_scratch_len, 256 / N);
+    gaussian_scratch = _aligned_alloc(64,
+                                      N * gaussian_scratch_len * sizeof(int32_t));
 
     polz *z1;
     polz *z2;
@@ -443,11 +581,16 @@ void lnp_prove(lnp_proof pi, statement ost, witness owt, const statement ist, co
     nonce++;
 
 rej_loop1:
+    if (profile) {
+        loop1_attempts++;
+        profile_attempt_started = revac_labrador_profile_seconds();
+    }
     // save hash before rejection sampling
     memcpy (tmp_h, ost->h, 16);
 
     // y: gaussian masks
-    polzvec_gaussian(y, 256 / N, pp->logsdp, seed, nonce++);
+    polzvec_gaussian_scratch(y, 256 / N, pp->logsdp, seed, nonce++,
+                             gaussian_scratch);
 #if YZERO == 1
     int64_t xxcoefs[256] = {0};
     xxcoefs[0] = -1;
@@ -603,6 +746,10 @@ rej_loop1:
         reject = __reject_decomp_proj (vtilde + i * 256 / N, vtilde + LNP_NPROJ * 256 / N + i * 256 / N, v0 + i * 256 / N, projz, 256 / N, pp->k[i]);
 #if !NOREJ
         if (reject) {// accept with prob. > 0.9999
+            if (profile) {
+                reject_projection++;
+                stage1_seconds += revac_labrador_profile_seconds() - profile_attempt_started;
+            }
             // printf("rejected v1[%lu]: too many carries\n", i);
             goto rej_loop1;
         }
@@ -691,12 +838,20 @@ rej_loop1:
     reject = is_rejected_std0(&state, sprod_zv, sprod_vv, pp->sdp * pp->sdp, pp->capmp);
 #if !NOREJ
     if (reject) {
+        if (profile) {
+            reject_z++;
+            stage1_seconds += revac_labrador_profile_seconds() - profile_attempt_started;
+        }
         // printf("z rejected: <v,v>=%ld <z,pv>=%ld\n", sprod_vv, sprod_zv);
         free (jlmat1);
         free (jlmat3);
         goto rej_loop1;
     }
 #endif
+    if (profile) {
+        stage1_seconds += revac_labrador_profile_seconds() - profile_attempt_started;
+        profile_section_started = revac_labrador_profile_seconds();
+    }
     memcpy (ost->h, tmp_h, 16); // store hash of accepted challange
 
     // sent z
@@ -842,11 +997,14 @@ rej_loop1:
 
     polxvec_init (g0, 1, 1);
     polxvec_init (g1, 1, 1);
-    polxvec_init (sp, 1, 1);
+    polxvec_init (sp0, 1, 1);
+    polxvec_init (sp1, 1, 1);
     polxvec_init (u, 1, 1);
     polxvec_init (v, 1, 1);
     polxvec_init (wsy1, pp->kappa_l2msis1, 1);
     polxvec_init (wvy1, pp->kappa_l2msis2, 1);
+    polxvec_init (wsx_store, pp->kappa_l2msis1, 1);
+    polxvec_init (wvx_store, pp->kappa_l2msis2, 1);
 
     polxvec_init_subvec2(yxq[Z1S10], yxl, pp->off[Z1S10], 1, pp->silen[0]);
     polxvec_init_subvec2(yxq[Z1S20], yxl, pp->off[Z1S20], 1, pp->silen[1]);
@@ -859,8 +1017,19 @@ rej_loop1:
     polxvec_init_subvec2 (svcom, comkey, 0, 1, pp->rslen);
 
 rej_loop2_outer:
+    if (profile) {
+        if (loop2_outer_attempts == 0)
+            static_seconds += revac_labrador_profile_seconds() - profile_section_started;
+        loop2_outer_attempts++;
+        profile_attempt_started = revac_labrador_profile_seconds();
+    }
     // y1: gaussian mask for stilde||vtilde
-    polzvec_gaussian(z1, pp->stildelen + pp->vtildelen, pp->logsd1, seed, nonce++);
+    polzvec_gaussian_scratch(z1, pp->stildelen + pp->vtildelen,
+                             pp->logsd1, seed, nonce++, gaussian_scratch);
+    if(profile){
+        outer_gauss_seconds += revac_labrador_profile_seconds() - profile_attempt_started;
+        outer_part_started = revac_labrador_profile_seconds();
+    }
 #if NOMASK == 1
     polzvec_setzero (z1, pp->stildelen + pp->vtildelen);
 #endif
@@ -892,6 +1061,10 @@ rej_loop2_outer:
     off = polxvec_sprod_extension_add(wsy1, ck_sv, s_sv);
     ck_off += off;
     assert(ck_off == pp->a2soff);
+    if(profile){
+        outer_s_seconds += revac_labrador_profile_seconds() - outer_part_started;
+        outer_part_started = revac_labrador_profile_seconds();
+    }
 
     polxvec_init_subvec (y1vx, tmp1x, 0, 1, pp->vtildelen);
     polzvec_topolxvec (y1vx, z1v, 0, 1, pp->vtildelen);
@@ -902,72 +1075,90 @@ rej_loop2_outer:
     // wvy1 = A1v * y1v
     off = polxvec_sprod_extension (wvy1, comkey, y1vx);
     assert (off == pp->a2voff);
-
-    // garbage polynomials g0, g1, u (valid until next outer iter)
-    polxvec_setzero (g0, 0, 1, 1);
-    for (i = 0; i < finalcnst->quad->len; i++) {
-        row = finalcnst->quad->rows[i];
-        col = finalcnst->quad->cols[i];
-        aij = &finalcnst->quad->coeffs[i];
-
-        polxvec_sprod (sp, yxq[row], yxq[col]);
-        polxvec_refresh (sp);
-        polxvec_polx_mul_add (g0, aij[0], sp);
-        polxvec_refresh (g0);
+    if(profile){
+        outer_v_seconds += revac_labrador_profile_seconds() - outer_part_started;
+        outer_part_started = revac_labrador_profile_seconds();
     }
 
-    polxvec_setzero (g1, 0, 1, 1);
-    polxvec_init_subvec2 (__t, finalcnst->lin->phi[0], 0, 1, pp->off[Z1S11]);
-    polxvec_sprod (g1, __t, yxl);
-    polxvec_refresh (g1);
-    for (i = 0; i < finalcnst->quad->len; i++) {
-        row = finalcnst->quad->rows[i];
-        col = finalcnst->quad->cols[i];
-        aij = &finalcnst->quad->coeffs[i];
-
-        polxvec_sprod (sp, yxq[row], sxq[col]);
-        polxvec_refresh (sp);
-        polxvec_sprod_add (sp, sxq[row], yxq[col]);
-        polxvec_refresh (sp);
-        polxvec_polx_mul_add (g1, aij[0], sp);
-        polxvec_refresh (g1);
+    // g0 and g1 depend on the same fixed constraint but write disjoint outputs.
+#ifdef _OPENMP
+#pragma omp parallel sections num_threads(2) \
+    if(revac_labrador_lnp_sections_parallel_enabled() && \
+       revac_labrador_threads() > 1)
+#endif
+    {
+#ifdef _OPENMP
+#pragma omp section
+#endif
+        lnp_compute_g0(g0, sp0, finalcnst, yxq);
+#ifdef _OPENMP
+#pragma omp section
+#endif
+        lnp_compute_g1(g1, sp1, finalcnst, yxq, sxq, yxl,
+                       pp->off[Z1S11]);
+    }
+    if(profile){
+        outer_g_seconds += revac_labrador_profile_seconds() - outer_part_started;
+        outer_part_started = revac_labrador_profile_seconds();
     }
 
     polxvec_init_subvec2 (__t, rsvx, 0, 1, pp->rslen);
     polxvec_copy (u, g1);
     polxvec_sprod_add (u, svcom, __t);
     polxvec_bindec (&sout[pp->off[UHAT]], u, 1, LOGQ);
+    if(profile)
+        outer_u_seconds += revac_labrador_profile_seconds() - outer_part_started;
+
+    if (profile)
+        outer_seconds += revac_labrador_profile_seconds() - profile_attempt_started;
 
 rej_loop2_inner:
+    if (profile) {
+        loop2_inner_attempts++;
+        profile_attempt_started = revac_labrador_profile_seconds();
+    }
     memcpy (tmp_h, ost->h, 16);
 
     // y2: gaussian mask for rs||rv
-    polzvec_gaussian(z2, pp->rslen + pp->rvlen, pp->logsd2, seed, nonce++);
+    polzvec_gaussian_scratch(z2, pp->rslen + pp->rvlen, pp->logsd2,
+                             seed, nonce++, gaussian_scratch);
 #if NOMASK == 1
     polzvec_setzero (z2, pp->rslen + pp->rvlen);
 #endif
 
-    // ws = wsy1 + A2s * y2s
-    polxvec_init_subvec (y2sx, tmp1x, 0, 1, pp->rslen);
-    polzvec_topolxvec (y2sx, z2s, 0, 1, pp->rslen);
-    polxvec_copy (y2sx_bak, y2sx);
-
-    polxvec_init_subvec (wsx, tmp2x, 0, 1, pp->kappa_l2msis1);
-    polxvec_copy (wsx, wsy1);
-    polxvec_sprod_extension_add (wsx, capa2s, y2sx);
-    polxvec_bindec (&sout[pp->off[WSHAT]], wsx, pp->kappa_l2msis1, LOGQ);
-
-    polxvec_init_subvec (y2vx, tmp1x, 0, 1, pp->rvlen);
-    polzvec_topolxvec (y2vx, z2v, 0, 1, pp->rvlen);
-
-    polxvec_init_subvec (wvx, tmp2x, 0, 1, pp->kappa_l2msis2);
-    polxvec_copy (wvx, wvy1);
-    polxvec_sprod_extension_add (wvx, capa2v, y2vx);
-    polxvec_bindec (&sout[pp->off[WVHAT]], wvx, pp->kappa_l2msis2, LOGQ);
-
-    polxvec_copy (v, g0);
-    polxvec_sprod_add (v, svcom, y2sx_bak);
-    polxvec_bindec (&sout[pp->off[VHAT]], v, 1, LOGQ);
+    // The s/v halves are independent.  Convert y2s directly into its retained
+    // buffer so a rejected inner attempt no longer pays for an extra copy.
+#ifdef _OPENMP
+#pragma omp parallel sections num_threads(2) \
+    if(revac_labrador_lnp_sections_parallel_enabled() && \
+       revac_labrador_threads() > 1)
+#endif
+    {
+#ifdef _OPENMP
+#pragma omp section
+#endif
+        {
+            polzvec_topolxvec (y2sx_bak, z2s, 0, 1, pp->rslen);
+            polxvec_copy (wsx_store, wsy1);
+            polxvec_sprod_extension_add (wsx_store, capa2s, y2sx_bak);
+            polxvec_bindec (&sout[pp->off[WSHAT]], wsx_store,
+                            pp->kappa_l2msis1, LOGQ);
+            polxvec_copy (v, g0);
+            polxvec_sprod_add (v, svcom, y2sx_bak);
+            polxvec_bindec (&sout[pp->off[VHAT]], v, 1, LOGQ);
+        }
+#ifdef _OPENMP
+#pragma omp section
+#endif
+        {
+            polxvec_init_subvec (y2vx, tmp1x, 0, 1, pp->rvlen);
+            polzvec_topolxvec (y2vx, z2v, 0, 1, pp->rvlen);
+            polxvec_copy (wvx_store, wvy1);
+            polxvec_sprod_extension_add (wvx_store, capa2v, y2vx);
+            polxvec_bindec (&sout[pp->off[WVHAT]], wvx_store,
+                            pp->kappa_l2msis2, LOGQ);
+        }
+    }
 
     // commit U5 = A*(wshat,wvhat,uhat,vhat) = A*u5vec
     off = 0;
@@ -994,52 +1185,50 @@ rej_loop2_inner:
     // sample challange
     sample_chalx_amortize(&cx, 1, tmp_h);
 
+    if (profile) {
+        inner_seconds += revac_labrador_profile_seconds() - profile_attempt_started;
+        profile_section_started = revac_labrador_profile_seconds();
+    }
+
     // z2 = y2 + c*(rs,rv)
     polxvec_init_subvec (crsvx, tmp1x, 0, 1, pp->rslen + pp->rvlen);
     polxvec_init_subvec (z2x, tmp2x, 0, 1, pp->rslen + pp->rvlen);
 
     polxvec_polx_mul (crsvx, cx, rsvx);
     polxvec_refresh (crsvx);
-    polzvec_topolxvec (z2x, z2, 0, 1, pp->rslen + pp->rvlen);
-    polxvec_add (z2x, z2x, crsvx);
-
-    polzvec_frompolxvec (crsv, crsvx, 0, 1, pp->rslen + pp->rvlen);
-    polzvec_center (crsv, pp->rslen + pp->rvlen);
-    polzvec_frompolxvec (z2, z2x, 0, 1, pp->rslen + pp->rvlen);
-    polzvec_center (z2, pp->rslen + pp->rvlen);
-
-    sprod_zv = polzvec_sprodz (z2, crsv, pp->rslen + pp->rvlen);
-    sprod_vv = polzvec_sprodz (crsv, crsv, pp->rslen + pp->rvlen);
-    if (is_rejected_sgnleak0(&state, sprod_zv, sprod_vv, pp->sd2 * pp->sd2, pp->capm2)) {
+    lnp_response_add(z2, crsv, crsvx, z2x, pp->rslen + pp->rvlen);
+    lnp_response_products(z2, crsv, pp->rslen + pp->rvlen, &sprod_zv, &sprod_vv);
+    reject = is_rejected_sgnleak0(&state, sprod_zv, sprod_vv,
+                                  pp->sd2 * pp->sd2, pp->capm2);
+    if (profile) z2_seconds += revac_labrador_profile_seconds() - profile_section_started;
+    if (reject) {
 #if !NOREJ
+        if (profile) reject_z2++;
         // printf("z2 rejected: <v,v>=%ld <z,pv>=%ld\n", sprod_vv, sprod_zv);
         goto rej_loop2_inner;
 #endif
     }
 
     // sample z1 = y1 + c*(stilde,vtilde)
+    if (profile) profile_section_started = revac_labrador_profile_seconds();
     polxvec_init_subvec (csvtildex, tmp1x, 0, 1, pp->stildelen + pp->vtildelen);
     polxvec_init_subvec (z1x, tmp2x, 0, 1, pp->stildelen + pp->vtildelen);
 
     polxvec_polx_mul (csvtildex, cx, svtildex);
     polxvec_refresh (csvtildex);
-    polzvec_topolxvec (z1x, z1, 0, 1, pp->stildelen + pp->vtildelen);
-    polxvec_add (z1x, z1x, csvtildex);
-
-    polzvec_frompolxvec (csvtilde, csvtildex, 0, 1, pp->stildelen + pp->vtildelen);
-    polzvec_center (csvtilde, pp->stildelen + pp->vtildelen);
-    polzvec_frompolxvec (z1, z1x, 0, 1, pp->stildelen + pp->vtildelen);
-    polzvec_center (z1, pp->stildelen + pp->vtildelen);
-
-    sprod_zv = polzvec_sprodz (z1, csvtilde, pp->stildelen + pp->vtildelen);
-    sprod_vv = polzvec_sprodz (csvtilde, csvtilde, pp->stildelen + pp->vtildelen);
+    lnp_response_add(z1, csvtilde, csvtildex, z1x, pp->stildelen + pp->vtildelen);
+    lnp_response_products(z1, csvtilde, pp->stildelen + pp->vtildelen, &sprod_zv, &sprod_vv);
     reject = is_rejected_std0(&state, sprod_zv, sprod_vv, pp->sd1 * pp->sd1, pp->capm1);
+    if (profile) z1_seconds += revac_labrador_profile_seconds() - profile_section_started;
 #if !NOREJ
     if (reject) {
+        if (profile) reject_z1++;
         // printf("z1 rejected: <v,v>=%ld <z,pv>=%ld\n", sprod_vv, sprod_zv);
         goto rej_loop2_outer;
     }
 #endif
+
+    if (profile) profile_final_started = revac_labrador_profile_seconds();
 
     memcpy (ost->h, tmp_h, 16); // save hash of accepted challange
 
@@ -1254,6 +1443,24 @@ rej_loop2_inner:
 
     lnp_addchecks (ost, pp, pi, cx, finalcnst);
 
+    if (profile) {
+        final_seconds += revac_labrador_profile_seconds() - profile_final_started;
+        fprintf(stderr,
+                "[Labrador 原生计数] LNP 尝试：阶段1=%zu、阶段2外=%zu、阶段2内=%zu；拒绝：投影=%zu、z=%zu、z2=%zu、z1=%zu\n",
+                loop1_attempts, loop2_outer_attempts, loop2_inner_attempts,
+                reject_projection, reject_z, reject_z2, reject_z1);
+        fprintf(stderr,
+                "[Labrador 原生细分] LNP：阶段1=%.6f 秒；静态聚合=%.6f 秒；外层掩码=%.6f 秒；内层承诺=%.6f 秒；z2 检查=%.6f 秒；z1 检查=%.6f 秒；收尾=%.6f 秒；总计=%.6f 秒\n",
+                stage1_seconds, static_seconds, outer_seconds, inner_seconds,
+                z2_seconds, z1_seconds, final_seconds,
+                revac_labrador_profile_seconds() - profile_total_started);
+        if(revac_labrador_profile_detail_enabled())
+            fprintf(stderr,
+                    "[Labrador LNP 外层细分] gaussian=%.6f s s-commit=%.6f s v-commit=%.6f s g0g1=%.6f s u=%.6f s attempts=%zu\n",
+                    outer_gauss_seconds, outer_s_seconds, outer_v_seconds,
+                    outer_g_seconds, outer_u_seconds, loop2_outer_attempts);
+    }
+
     polxvec_free(tmp1x);
     polxvec_free(tmp2x);
     polxvec_free(iwtx);
@@ -1263,6 +1470,7 @@ rej_loop2_inner:
     free(jlmat3);
     free (csvtilde);
     free (crsv);
+    free (gaussian_scratch);
     free (z1);
     free (z2);
 
@@ -1272,9 +1480,12 @@ rej_loop2_inner:
     polxvec_free (v);
     polxvec_free (yxl);
     polxvec_free (y2sx_bak);
-    polxvec_free (sp);
+    polxvec_free (sp0);
+    polxvec_free (sp1);
     polxvec_free (wsy1);
     polxvec_free (wvy1);
+    polxvec_free (wsx_store);
+    polxvec_free (wvx_store);
 
     polxvec_free (ppowers);
     polxvec_free (m1powers);
@@ -1423,10 +1634,29 @@ static void lnp_addchecks(statement ost, const lnp_params pp, const lnp_proof pi
 static void _get_params_rejstd (long double *capm, unsigned int *log2sd, long double *sd,
                                   long double *gamma, long double t) {
     *log2sd = (unsigned int)roundl(log2l(*sd / 1.55)); // floor, ceil better?
-    *sd = (long double)1.55 * (1 << *log2sd);
+    *sd = ldexpl((long double)1.55, (int)*log2sd);
     *gamma = *sd / t;
 
     *capm = expl(GTAILBND / *gamma + 1 / (2 * *gamma * *gamma));
+}
+
+/* Optional exact-parameter ablation for the large z1 rejection loop.  The
+ * supported sampler grid is discrete (1.55*2^k); choosing the upper point
+ * raises acceptance without altering the distributional proof argument.  The
+ * choice is transcript/profile-bound by the application and is measured for
+ * proof-size cost before becoming a fixed profile parameter. */
+static void _get_params_rejstd_z1(long double *capm, unsigned int *log2sd,
+                                  long double *sd, long double *gamma,
+                                  long double t) {
+    const char *mode = getenv("REVAC_LNP_Z1_SIGMA");
+    if(mode != NULL && strcmp(mode, "ceil") == 0) {
+        *log2sd = (unsigned int)ceill(log2l(*sd / 1.55));
+        *sd = ldexpl((long double)1.55, (int)*log2sd);
+        *gamma = *sd / t;
+        *capm = expl(GTAILBND / *gamma + 1 / (2 * *gamma * *gamma));
+        return;
+    }
+    _get_params_rejstd(capm, log2sd, sd, gamma, t);
 }
 
 // round the standard deviations that will be sampled
@@ -1434,7 +1664,7 @@ static void _get_params_rejstd (long double *capm, unsigned int *log2sd, long do
 static void _get_params_rejsgnleak (long double *capm, unsigned int *log2sd, long double *sd,
                                     long double *gamma, long double t) {
     *log2sd = (unsigned int)ceill(log2l(*sd / 1.55)); // floor, ceil better?
-    *sd = (long double)1.55 * (1 << *log2sd);
+    *sd = ldexpl((long double)1.55, (int)*log2sd);
     *gamma = *sd / t;
 
     *capm = expl(1 / (2 * *gamma * *gamma));
@@ -1553,7 +1783,8 @@ int lnp_params_gen (lnp_params outpp, size_t *pibits, size_t *owtbits, const sta
     betassq += s6betasq; // s6
     betassq += 2 * LNP_NPROJ * LNP_MAXCARRIES;
     sd1 = gamma1 * T * sqrtl(betassq);
-    _get_params_rejstd (&capm1, &logsd1, &sd1, &gamma1, T * sqrtl(betassq));
+    _get_params_rejstd_z1(&capm1, &logsd1, &sd1, &gamma1,
+                          T * sqrtl(betassq));
     
     // standard deviation for mask y2: z2 = y2 + c*(rs,rv)
     sd2 = gamma2 * T * sqrtl(N * rslen + N * rvlen);

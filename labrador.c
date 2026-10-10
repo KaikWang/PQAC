@@ -1,10 +1,12 @@
 #include "labrador.h"
+#include <string.h>
 #include "labrador_core.h"
 #include "proofsystem.h"
 #include "polx.h"
 #include "polz.h"
 #include "jlproj.h"
 #include "malloc.h"
+#include "revac_profile.h"
 #include "fips202.h"
 
 void ldr_aggregate_zq(
@@ -18,28 +20,35 @@ void ldr_aggregate_zq(
   uint8_t h[16]
 )
 {
-  size_t i, nchalz, nchalx;
-  int64_t *chalz, proj;
-  polxvec chalx;
+  size_t i, nchalz, nchalx, chalz_stride;
+  int64_t *chalz, proj[LIFTS];
+  polxvec chalx[LIFTS];
+  const int threads = revac_labrador_team_threads(LIFTS);
   __attribute__((aligned(64)))
   uint8_t hashbuf[64 + QBYTES*256 + 24];
 
   nchalz = ist->zqcnst->sparse_nchal + ist->zqcnst->int_nchal;
   nchalx =  ist->zqcnst->sigmam1_nchal;
-  chalz = _aligned_alloc(64, (256 + nchalz+64-nchalz%64) * sizeof(int64_t));
-  if(nchalx > 0){
-    polxvec_init(chalx, nchalx, 1);
-  }
+  chalz_stride = 256 + nchalz + 64 - nchalz % 64;
+  chalz = _aligned_alloc(64, LIFTS * chalz_stride * sizeof(int64_t));
+  memset(chalx, 0, sizeof(chalx));
 
   for(i=0;i<LIFTS;i++){
     shake128(hashbuf, sizeof(hashbuf), h, 16);
     memcpy(h, hashbuf, 16);
-    jlproj_expand_challenge(chalz, &hashbuf[64]);
-    sample_chalz(&chalz[256], nchalz, h);
+    jlproj_expand_challenge(&chalz[i * chalz_stride], &hashbuf[64]);
+    sample_chalz(&chalz[i * chalz_stride + 256], nchalz, h);
     if(nchalx > 0){
-      sample_chalx_uniform(chalx, h);
+      polxvec_init(chalx[i], nchalx, 1);
+      sample_chalx_uniform(chalx[i], h);
     }
+    proj[i] = jlproj_collapsproj(p, &chalz[i * chalz_stride]);
+  }
 
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(threads) if(revac_labrador_parallel_work(LIFTS, 2)) schedule(static)
+  #endif
+  for(i=0;i<LIFTS;i++){
     sparsecnst_init(zqagg[i], 1);
     quadfunc_init(zqagg[i]->quad, 0, (r_old * r_old + r_old)/2);
     linfunc_init(zqagg[i]->lin, 1, 1, 1);
@@ -47,11 +56,12 @@ void ldr_aggregate_zq(
     zqagg[i]->lin->off[0] = 0;
     polxvec_init(zqagg[i]->lin->phi[0], nn, 1);
 
-    jl_aggregate_mat(zqagg[i]->lin->phi[0], jlmat1, jlmat2, chalz);
-    proj = jlproj_collapsproj(p, chalz);
-    polxvec_monomial(zqagg[i]->b, 0, 0, proj);
+    jl_aggregate_mat(zqagg[i]->lin->phi[0], jlmat1, jlmat2,
+                     &chalz[i * chalz_stride]);
+    polxvec_monomial(zqagg[i]->b, 0, 0, proj[i]);
 
-    zqcnstset_aggregate_add(zqagg[i], ist->zqcnst, &chalz[256], chalx);
+    zqcnstset_aggregate_add(zqagg[i], ist->zqcnst,
+                            &chalz[i * chalz_stride + 256], chalx[i]);
 
     sparsecnst_refresh(zqagg[i]);
 
@@ -60,8 +70,10 @@ void ldr_aggregate_zq(
   }
 
   free(chalz);
-  if(nchalx > 0){
-    polxvec_free(chalx);
+  for(i=0;i<LIFTS;i++){
+    if(nchalx > 0){
+      polxvec_free(chalx[i]);
+    }
   }
 }
 

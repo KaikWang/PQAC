@@ -31,6 +31,7 @@ void pack_params_free(pack_params pp);
 
 void pack_prove(pack_proof pi, const statement ist, const witness iwt,
                 const pack_params pp);
+int pack_last_prove_relation_valid(void);
 int pack_verify(const statement ist, const pack_params pp, 
                 const pack_proof pi);
 
