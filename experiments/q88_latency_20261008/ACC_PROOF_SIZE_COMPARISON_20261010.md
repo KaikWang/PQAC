@@ -133,3 +133,23 @@ otherwise a bridge would be a fixed-handle shortcut and would not preserve the
 security statement.  The next integration gate is therefore a full q88
 relation dump into this compiler, followed by a native single-statement Pack
 proof and serialized-byte measurement.
+
+### q88 relation decomposition used by the bridge
+
+The wire relation has 22 truncation-right polynomials (`TRUNC_RIGHT=22`),
+168 non-tag witness slots, and six refresh `z` polynomials.  A safe single
+relation must preserve the following terms:
+
+| term | bridge treatment |
+| --- | --- |
+| `w0 + A_trap*w1` | direct common witness columns after CRT lift |
+| 22 truncation terms | direct columns plus their public radix scales |
+| `B_{bit,digit}*right_{bit,digit}` | auxiliary aggregate witness plus a bound gadget equation |
+| refresh `A_hat(r)*z_block` | auxiliary composed public polynomial plus selector binding |
+| accumulator RHS and lane lifts | one CRT target and quotient/carry digits |
+
+The last two rows cannot be replaced by prover-selected effective public
+coefficients in a production proof.  That would reveal or fix the hidden
+handle/selector.  The current KAT deliberately stops before those rows; its
+purpose is to validate the exact integer bridge and quotient/carry arithmetic,
+not to claim a secure q88 proof yet.
