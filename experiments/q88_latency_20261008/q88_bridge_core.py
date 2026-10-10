@@ -533,15 +533,12 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
     for layer in range(equation_count):
         terms = []
         witnesses = []
-        for col in range(columns):
-            for public_layer in range(len(bridge.h_digits[col])):
+        for start in range(0, columns, group_size):
+            end = min(start + group_size, columns)
+            for public_layer in range(len(bridge.h_digits[start])):
                 witness_layer = layer - public_layer
-                if not 0 <= witness_layer < len(bridge.w_digits[col]):
+                if not 0 <= witness_layer < len(bridge.w_digits[start]):
                     continue
-                if col % group_size:
-                    continue
-                start = col
-                end = min(start + group_size, columns)
                 block = [bridge.h_digits[index][public_layer]
                          for index in range(start, end)]
                 pv = polyvec_t(ring, len(block))
@@ -549,7 +546,6 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
                     pv[index] = poly_t(ring, values)
                 terms.append(pv)
                 witnesses.append(ref_to_index[("w", witness_layer, start)])
-                break
         for q_layer, modulus_digit in enumerate(bridge.q_digits):
             quotient_layer = layer - q_layer
             if 0 <= quotient_layer < len(bridge.quotient_digits):
