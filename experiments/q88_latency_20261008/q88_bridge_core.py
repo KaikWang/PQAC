@@ -360,9 +360,8 @@ class DigitBinding:
                 if layer < len(digits):
                     expression = [x + y for x, y in zip(expression,
                                                          digits[layer])]
-            if layer:
-                expression = [x - y for x, y in zip(expression,
-                                                     self.output_digits[layer-1])]
+            expression = [x - y for x, y in zip(expression,
+                                                 self.output_digits[layer])]
             expression = [x - self.base * y for x, y in
                           zip(expression, self.carries[layer])]
             if expression != [0] * degree:
