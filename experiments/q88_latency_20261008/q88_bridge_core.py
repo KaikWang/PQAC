@@ -282,3 +282,62 @@ def compile_linear_crt_bridge(matrix: Sequence[Sequence[Sequence[int]]],
         quotient_layers, tuple(tuple(layer) for layer in carries))
     bridge.verify()
     return bridge
+
+
+def aggregate_handle_witness(right_polys: Sequence[Sequence[int]],
+                             handle_bits: Sequence[int], *,
+                             gadget_base: int = 26_007,
+                             gadget_digits: int = 6) -> list[int]:
+    """Build the hidden-handle aggregate used as a bridge auxiliary witness.
+
+    ``right_polys`` is laid out as ``HANDLE_BITS * gadget_digits`` vectors.
+    The returned polynomial is the exact integer combination appearing in the
+    accumulator relation.  Callers must prove this equality; it is never
+    treated as a public coefficient.
+    """
+    if len(right_polys) != len(handle_bits) * gadget_digits:
+        raise ValueError("q88 handle aggregate shape mismatch")
+    if any(bit not in (0, 1) for bit in handle_bits):
+        raise ValueError("q88 handle aggregate expects binary bits")
+    degree = len(right_polys[0])
+    if any(len(poly) != degree for poly in right_polys):
+        raise ValueError("q88 handle aggregate degree mismatch")
+    out = [0] * degree
+    scale = 1
+    for bit, selected in enumerate(handle_bits):
+        for digit in range(gadget_digits):
+            right = right_polys[bit * gadget_digits + digit]
+            factor = scale if selected else 0
+            out = [x + factor * y for x, y in zip(out, right)]
+            scale *= gadget_base
+    return out
+
+
+def compose_refresh_witness(refresh_bank: Sequence[Sequence[int]],
+                            selector_bits: Sequence[int]) -> list[int]:
+    """Compose refresh public rows using the hidden selector bits.
+
+    The result is an auxiliary public-polynomial witness input.  A production
+    bridge must retain the selector binding equation, so this helper does not
+    make the composed result public by itself.
+    """
+    if len(refresh_bank) != len(selector_bits) + 1:
+        raise ValueError("q88 refresh bank shape mismatch")
+    if any(bit not in (0, 1) for bit in selector_bits):
+        raise ValueError("q88 refresh selector expects binary bits")
+    degree = len(refresh_bank[0])
+    if any(len(poly) != degree for poly in refresh_bank):
+        raise ValueError("q88 refresh bank degree mismatch")
+    out = list(refresh_bank[0])
+    for bit, poly in zip(selector_bits, refresh_bank[1:]):
+        if bit:
+            out = [x + y for x, y in zip(out, poly)]
+    return out
+
+
+def verify_auxiliary_equality(actual: Sequence[int], expected: Sequence[int],
+                              *, label: str) -> None:
+    """Fail closed when an auxiliary witness differs from its hidden recipe."""
+    if len(actual) != len(expected) or any(x != y for x, y in zip(actual,
+                                                                  expected)):
+        raise ValueError(f"q88 auxiliary witness mismatch: {label}")

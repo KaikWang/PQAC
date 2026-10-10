@@ -30,6 +30,24 @@ def main() -> None:
     print(f"matrix radix layers: {len(bridge.matrix_digits[0])}")
     print(f"quotient coefficient: {bridge.quotient_digits[0][0]}")
 
+    # Auxiliary hidden-product checks are part of the bridge boundary.
+    from q88_bridge_core import (aggregate_handle_witness,
+                                 compose_refresh_witness,
+                                 verify_auxiliary_equality)
+    rights = [[1, 0, 0, 0, 0, 0, 0, 0] for _ in range(12)]
+    aggregate = aggregate_handle_witness(rights, [1, 0],
+                                         gadget_base=7, gadget_digits=6)
+    verify_auxiliary_equality(
+        aggregate, [sum(7 ** digit for digit in range(6)), 0, 0, 0,
+                     0, 0, 0, 0], label="handle")
+    refresh = compose_refresh_witness(
+        [[3, 0, 0, 0, 0, 0, 0, 0],
+         [5, 0, 0, 0, 0, 0, 0, 0],
+         [11, 0, 0, 0, 0, 0, 0, 0]], [1, 0])
+    verify_auxiliary_equality(refresh, [8, 0, 0, 0, 0, 0, 0, 0],
+                              label="refresh")
+    print("auxiliary hidden-product checks: PASS")
+
 
 if __name__ == "__main__":
     main()
