@@ -384,11 +384,10 @@ def compile_digit_binding(inputs: Sequence[Sequence[int]],
         raise ValueError("digit binding capacity exhausted")
     input_digits = []
     for poly, scalar in zip(inputs, scalars):
-        layers = []
-        for layer in range(digits):
-            layers.append([((int(scalar) * int(value) + base // 2) % base)
-                           - base // 2 for value in poly])
-        input_digits.append(tuple(tuple(layer) for layer in layers))
+        scaled = [int(scalar) * int(value) for value in poly]
+        input_digits.append(tuple(tuple(layer) for layer in
+                                 _decompose(scaled, base, digits,
+                                            signed=True)))
     output_digits = tuple(tuple(_digit for _digit in layer) for layer in
                           zip(*[_balanced for _balanced in []])) if False else tuple(
         tuple(layer) for layer in _decompose(target, base, digits, signed=True))
