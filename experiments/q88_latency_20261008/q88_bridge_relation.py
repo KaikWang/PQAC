@@ -365,10 +365,12 @@ def build_safe_main_relation(public: Any, prover: Any,
         one = [0] * degree
         one[0] = -1
         columns.append(one)
-        for block in range(REFRESH_BLOCKS):
-            one = [0] * degree
-            one[0] = 1
-            columns.append(one)
+        for product_lane in range(3):
+            for block in range(REFRESH_BLOCKS):
+                one = [0] * degree
+                if product_lane == lane:
+                    one[0] = 1
+                columns.append(one)
         columns_by_lane.append(tuple(tuple(column) for column in columns))
     safe_slots = tuple(witness_slots[:2 + TRUNC_RIGHT]) + (aggregate_slot,) + product_slots
     product_indices_by_lane = tuple(tuple(2 + TRUNC_RIGHT + 1 + lane * REFRESH_BLOCKS + block
