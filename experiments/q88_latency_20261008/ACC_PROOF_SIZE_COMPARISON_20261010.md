@@ -73,6 +73,13 @@ same **194.03 KiB** envelope while increasing the one-show measurement to
 6.236 s prove and 3.128 s verify. It is therefore rejected as a size
 optimization.
 
+A grouped-refresh prototype was then tested with six block equations packed
+into one padded rank-8 extension relation per CRT lane. The existing Python
+constraint API rejects this mixed degree-256 selector/degree-4096 witness shape
+before relation checking. The prototype was removed from the active source;
+the next implementation must add a native mixed-degree sparse helper in the
+LaBRADOR bridge before this optimization can be evaluated.
+
 ## Conclusion and next implementation boundary
 
 The Lazer-Acc ideas are applicable, but the safe transplant is not a simple
