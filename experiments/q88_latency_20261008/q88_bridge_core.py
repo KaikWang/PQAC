@@ -15,6 +15,7 @@ from typing import Iterable, Sequence
 
 LANE_MODULI = (1_073_692_673, 536_813_569, 536_690_689)
 CRT_MODULUS = prod(LANE_MODULI)
+PACK_MODULUS = (1 << 38) - 107
 
 
 def _crt_constants() -> tuple[int, ...]:
