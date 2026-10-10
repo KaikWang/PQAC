@@ -304,8 +304,8 @@ def aggregate_handle_witness(right_polys: Sequence[Sequence[int]],
     if any(len(poly) != degree for poly in right_polys):
         raise ValueError("q88 handle aggregate degree mismatch")
     out = [0] * degree
-    scale = 1
     for bit, selected in enumerate(handle_bits):
+        scale = 1
         for digit in range(gadget_digits):
             right = right_polys[bit * gadget_digits + digit]
             factor = scale if selected else 0
