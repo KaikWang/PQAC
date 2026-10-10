@@ -377,3 +377,23 @@ def build_safe_main_relation(public: Any, prover: Any,
     targets = relation.target
     return SafeMainRelation(tuple(columns_by_lane), tuple(common_witness),
                             targets, safe_slots, product_indices_by_lane)
+
+
+def compile_safe_main_crt_bridge(safe: SafeMainRelation, *, base: int = 128,
+                                 witness_digits: int = 9,
+                                 quotient_digits: int = 16):
+    """Compile the safe main relation as one exact CRT bridge."""
+    try:
+        from .q88_bridge_core import compile_linear_crt_bridge
+    except ImportError:
+        from q88_bridge_core import compile_linear_crt_bridge
+    lane_matrix = tuple(tuple(tuple(int(value) % MODULI[lane]
+                                    for value in column)
+                             for column in columns)
+                       for lane, columns in enumerate(safe.lane_matrix))
+    lane_target = tuple(tuple(int(value) % MODULI[lane]
+                              for value in safe.target[lane])
+                        for lane in range(3))
+    return compile_linear_crt_bridge(
+        lane_matrix, safe.witness, lane_target, base=base,
+        witness_digits=witness_digits, quotient_digits=quotient_digits)
