@@ -193,3 +193,20 @@ A two-show scalar-refresh rerun produced envelopes of **193.75 KiB** and
 **193.78 KiB** (complete show packets 218.97 and 219.00 KiB), with prove times
 4.820/4.626 s and verify times 2.574/2.429 s.  These are the current like-for-
 like production comparison values.
+
+## Full-security acceptance gate
+
+A reduced q88 proof is accepted only if one serialized Pack proof contains all
+of the following and passes both clear and Pack verification:
+
+1. the three-lane accumulator relation after exact 88-bit CRT lifting;
+2. radix-128 quotient and carry equations with pinned norm bounds;
+3. handle gadget auxiliary witnesses and their hidden-bit binding equations;
+4. refresh composed-polynomial auxiliary witnesses and selector binding;
+5. accumulator lift reconstruction;
+6. the q19 link relation and shared-handle binding;
+7. native proof serialization and deserialization with the same statement hash.
+
+Any proof that substitutes effective public handle/refresh coefficients, drops
+one lane, or omits the link relation is an audit prototype only and must not be
+compared with the 193.75/193.78 KiB production envelopes.
