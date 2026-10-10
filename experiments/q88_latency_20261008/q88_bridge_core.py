@@ -407,3 +407,43 @@ def compile_digit_binding(inputs: Sequence[Sequence[int]],
                           tuple(tuple(layer) for layer in carries))
     result.verify()
     return result
+
+@dataclass(frozen=True)
+class NativeBindingConstraint:
+    layer: int
+    input_indices: tuple[int, ...]
+    output_index: int
+    previous_carry_index: int | None
+    carry_index: int
+    coefficients: tuple[int, ...]
+
+
+def make_native_binding_plan(binding: DigitBinding,
+                              *, input_start: int = 0,
+                              output_start: int | None = None,
+                              carry_start: int | None = None
+                              ) -> tuple[NativeBindingConstraint, ...]:
+    """Describe digit binding equations for native Pack construction.
+
+    Indices refer to the caller's witness-vector map.  The plan contains no
+    hidden effective coefficient; all coefficients are public radix constants.
+    """
+    input_count = len(binding.input_digits)
+    output_base = (input_start + input_count if output_start is None
+                   else output_start)
+    carry_base = (output_base + len(binding.output_digits)
+                  if carry_start is None else carry_start)
+    result = []
+    for layer in range(len(binding.output_digits)):
+        previous = carry_base + layer - 1 if layer else None
+        result.append(NativeBindingConstraint(
+            layer=layer,
+            input_indices=tuple(input_start + index * len(binding.output_digits)
+                                + layer for index in range(input_count)),
+            output_index=output_base + layer,
+            previous_carry_index=previous,
+            carry_index=carry_base + layer,
+            coefficients=tuple([1] * input_count + [-1] +
+                               ([1] if previous is not None else []) +
+                               [-binding.base])))
+    return tuple(result)
