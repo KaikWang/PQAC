@@ -247,3 +247,64 @@ def build_auxiliary_product_witnesses(public: Any, prover: Any,
         raise ValueError("q88 handle product degree mismatch")
     return (tuple(tuple(aggregate) for _ in range(3)),
             tuple(refresh_products))
+
+@dataclass(frozen=True)
+class AuxiliaryDigitWitness:
+    base: int
+    handle_digits: tuple[tuple[tuple[int, ...], ...], ...]
+    refresh_digits: tuple[tuple[tuple[tuple[int, ...], ...], ...], ...]
+
+    def verify(self) -> None:
+        def rebuild(layers: tuple[tuple[int, ...], ...]) -> list[int]:
+            degree = len(layers[0]) if layers else 0
+            return [sum(layer[d] * self.base ** d
+                        for d in range(len(layers)))
+                    for layer in zip(*layers)] if degree else []
+        for lane in self.handle_digits:
+            for layers in lane:
+                if any(value != rebuilt for value, rebuilt in
+                       zip(rebuild(layers), rebuild(layers))):
+                    raise ValueError("q88 handle digit rebuild failed")
+        for lane in self.refresh_digits:
+            for block in lane:
+                for layers in block:
+                    rebuild(layers)
+
+
+def _balanced_layers(poly: tuple[int, ...], *, base: int,
+                     digits: int) -> tuple[tuple[int, ...], ...]:
+    from math import prod
+    if any(abs(value) >= (base ** digits) // 2 for value in poly):
+        raise ValueError("q88 auxiliary radix capacity exhausted")
+    layers = [[0] * len(poly) for _ in range(digits)]
+    for index, value in enumerate(poly):
+        encoded = []
+        remaining = int(value)
+        for _ in range(digits):
+            digit = (remaining + base // 2) % base - base // 2
+            encoded.append(digit)
+            remaining = (remaining - digit) // base
+        if remaining:
+            raise ValueError("q88 auxiliary radix remainder")
+        for layer, digit in enumerate(encoded):
+            layers[layer][index] = digit
+    return tuple(tuple(layer) for layer in layers)
+
+
+def digitize_auxiliary_products(handle_products: tuple[tuple[int, ...], ...],
+                                refresh_products: tuple[
+                                    tuple[tuple[int, ...], ...], ...], *,
+                                base: int = 128,
+                                digits: int = 12) -> AuxiliaryDigitWitness:
+    """Digitize every lane auxiliary product for quotient/carry binding."""
+    handle_digits = tuple(tuple(_balanced_layers(poly, base=base,
+                                                  digits=digits)
+                                for poly in lane)
+                         for lane in handle_products)
+    refresh_digits = tuple(tuple(tuple(_balanced_layers(
+        poly, base=base, digits=digits) for poly in block)
+                              for block in lane)
+                          for lane in refresh_products)
+    result = AuxiliaryDigitWitness(base, handle_digits, refresh_digits)
+    result.verify()
+    return result
