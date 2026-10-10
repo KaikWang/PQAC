@@ -112,3 +112,24 @@ verification, exact signed-lift reconstruction, the existing norm gate, and a
 wire-size regression check.  Until that adapter exists, **194 KiB is the
 verified q88 accumulator-proof size**; 126 KB is a promising target estimate,
 not a current q88 result.
+
+## 2026-10-10: exact CRT bridge KAT
+
+`q88_bridge_core.py` now contains an engine-independent compiler for the first
+real Lazer-Acc step: it CRT-lifts the three lane public polynomials, checks the
+single 88-bit congruence, expands it in radix 128, and verifies every integer
+quotient/carry layer before a Pack adapter can consume it.  The degree-8 KAT is
+runnable with:
+
+```bash
+PYTHONPATH=experiments/q88_latency_20261008 \
+  python3 experiments/q88_latency_20261008/q88_bridge_kat.py
+```
+
+This KAT passes and is not a size claim.  It does not yet include q88's hidden
+handle products, refresh product, or q19 link constraints.  Those products
+must be represented by bound auxiliary witnesses and their gadget relations;
+otherwise a bridge would be a fixed-handle shortcut and would not preserve the
+security statement.  The next integration gate is therefore a full q88
+relation dump into this compiler, followed by a native single-statement Pack
+proof and serialized-byte measurement.

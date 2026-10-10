@@ -9,6 +9,7 @@ not construct a proof statement or choose security parameters.
 from __future__ import annotations
 
 from math import prod
+from dataclasses import dataclass
 from typing import Iterable, Sequence
 
 
@@ -87,3 +88,197 @@ def audit_round_trip(values: Iterable[int], *, base: int = 128,
                             for index, digit in enumerate(encoded))
         if reconstructed != value:
             raise ValueError("q88 bridge radix round trip failed")
+
+
+def negacyclic_mul(a: Sequence[int], b: Sequence[int]) -> list[int]:
+    """Small exact reference multiplication used by the bridge KAT.
+
+    The production implementation will replace this with the ring backend;
+    keeping the KAT arithmetic independent makes CRT/lift mistakes visible.
+    """
+    if len(a) != len(b):
+        raise ValueError("q88 bridge polynomial degree mismatch")
+    n = len(a)
+    out = [0] * n
+    for i, left in enumerate(a):
+        for j, right in enumerate(b):
+            k = i + j
+            out[k % n] += left * right if k < n else -left * right
+    return out
+
+
+def crt_lift_polynomial(lane_polys: Sequence[Sequence[int]]) -> list[int]:
+    """Canonical coefficient lift of three lane polynomials to the q88 ring."""
+    return crt_recombine_poly(lane_polys)
+
+
+def _digits(value: int, base: int, count: int, *, signed: bool) -> list[int]:
+    if base < 2 or base & (base - 1):
+        raise ValueError("q88 bridge radix must be a power of two")
+    out: list[int] = []
+    remaining = int(value)
+    half = base // 2
+    for _ in range(count):
+        if signed:
+            digit = (remaining + half) % base - half
+        else:
+            if remaining < 0:
+                raise ValueError("negative unsigned bridge value")
+            digit = remaining % base
+        out.append(digit)
+        remaining = (remaining - digit) // base
+    if remaining:
+        raise ValueError("q88 bridge digit capacity exhausted")
+    return out
+
+
+def _decompose(poly: Sequence[int], base: int, count: int,
+               *, signed: bool) -> list[list[int]]:
+    layers = [[0] * len(poly) for _ in range(count)]
+    for index, value in enumerate(poly):
+        for layer, digit in enumerate(_digits(value, base, count,
+                                               signed=signed)):
+            layers[layer][index] = digit
+    return layers
+
+
+@dataclass(frozen=True)
+class LinearCRTBridge:
+    """Exact quotient/carry expansion of one CRT-combined relation.
+
+    This object is deliberately proof-engine agnostic.  It is the boundary
+    between the q88 relation and the Pack adapter: all arrays are integer
+    arrays, and ``verify`` must pass before a native statement is built.
+    """
+
+    base: int
+    matrix_digits: tuple[tuple[tuple[int, ...], ...], ...]
+    witness_digits: tuple[tuple[tuple[int, ...], ...], ...]
+    modulus_digits: tuple[int, ...]
+    target_digits: tuple[tuple[int, ...], ...]
+    quotient_digits: tuple[tuple[int, ...], ...]
+    carry_digits: tuple[tuple[int, ...], ...]
+
+    def verify(self) -> None:
+        n = len(self.target_digits[0]) if self.target_digits else 0
+        zero = [0] * n
+        for layer in range(len(self.carry_digits)):
+            expression = [0] * n
+            for matrix, witness in zip(self.matrix_digits,
+                                       self.witness_digits):
+                for i, matrix_digit in enumerate(matrix):
+                    j = layer - i
+                    if 0 <= j < len(witness):
+                        product = negacyclic_mul(matrix_digit,
+                                                 witness[j])
+                        expression = [x + y for x, y in zip(expression,
+                                                             product)]
+            for i, modulus_digit in enumerate(self.modulus_digits):
+                j = layer - i
+                if 0 <= j < len(self.quotient_digits):
+                    qproduct = [modulus_digit * x
+                                for x in self.quotient_digits[j]]
+                    expression = [x - y for x, y in zip(expression, qproduct)]
+            if layer < len(self.target_digits):
+                expression = [x - y for x, y in
+                              zip(expression, self.target_digits[layer])]
+            if layer:
+                expression = [x + y for x, y in
+                              zip(expression, self.carry_digits[layer - 1])]
+            expression = [x - self.base * y for x, y in
+                          zip(expression, self.carry_digits[layer])]
+            if expression != zero:
+                raise ValueError(f"q88 bridge carry equation {layer} failed")
+
+
+def compile_linear_crt_bridge(matrix: Sequence[Sequence[Sequence[int]]],
+                              witness: Sequence[Sequence[int]],
+                              target: Sequence[Sequence[int]], *,
+                              base: int = 128,
+                              witness_digits: int = 9,
+                              quotient_digits: int = 16) -> LinearCRTBridge:
+    """Compile lane residues into one exact q88 quotient/carry relation.
+
+    ``matrix`` and ``target`` are three lane arrays.  ``witness`` is the
+    common signed integer witness.  The function rejects any lane mismatch or
+    non-integral CRT lift; it never silently reduces the 88-bit relation to a
+    proof-prime relation.
+    """
+    if len(matrix) != len(LANE_MODULI) or len(target) != len(LANE_MODULI):
+        raise ValueError("q88 bridge expects three CRT lanes")
+    if not witness:
+        raise ValueError("q88 bridge needs a witness")
+    degree = len(witness[0])
+    if any(len(poly) != degree for poly in witness):
+        raise ValueError("q88 bridge witness degree mismatch")
+    if any(len(poly) != degree for lane in matrix for poly in lane):
+        raise ValueError("q88 bridge matrix degree mismatch")
+    if any(len(poly) != degree for poly in target):
+        raise ValueError("q88 bridge target degree mismatch")
+    lifted_matrix = [crt_lift_polynomial([matrix[lane][column]
+                                           for lane in range(3)])
+                     for column in range(len(witness))]
+    lifted_target = crt_lift_polynomial(target)
+    total = [0] * degree
+    for coeffs, secret in zip(lifted_matrix, witness):
+        total = [x + y for x, y in zip(total, negacyclic_mul(coeffs, secret))]
+    quotient = []
+    for value, rhs in zip(total, lifted_target):
+        difference = value - rhs
+        if difference % CRT_MODULUS:
+            raise ValueError("q88 CRT congruence does not hold")
+        quotient.append(difference // CRT_MODULUS)
+    matrix_count = max(CRT_MODULUS.bit_length(),
+                       max((value.bit_length() for poly in lifted_matrix
+                            for value in poly), default=1))
+    matrix_count = max(1, (matrix_count + base.bit_length() - 2) /
+                       (base.bit_length() - 1))
+    matrix_count = int(matrix_count)
+    modulus_digits = tuple(_digits(CRT_MODULUS, base, matrix_count,
+                                   signed=False))
+    matrix_digits = tuple(tuple(tuple(layer) for layer in
+                                _decompose(poly, base, matrix_count,
+                                           signed=False))
+                          for poly in lifted_matrix)
+    witness_layers = tuple(tuple(tuple(layer) for layer in
+                                 _decompose(poly, base, witness_digits,
+                                            signed=True))
+                           for poly in witness)
+    target_digits = tuple(tuple(layer) for layer in
+                          _decompose(lifted_target, base, matrix_count,
+                                     signed=False))
+    quotient_layers = tuple(tuple(layer) for layer in
+                            _decompose(quotient, base, quotient_digits,
+                                        signed=True))
+    layer_count = max(matrix_count + witness_digits - 1,
+                      matrix_count + quotient_digits - 1) + 1
+    carries: list[list[int]] = []
+    previous = [0] * degree
+    for layer in range(layer_count):
+        expression = previous[:]
+        for coeffs, secret in zip(matrix_digits, witness_layers):
+            for i, coeff_digit in enumerate(coeffs):
+                j = layer - i
+                if 0 <= j < len(secret):
+                    expression = [x + y for x, y in
+                                  zip(expression,
+                                      negacyclic_mul(coeff_digit, secret[j]))]
+        for i, modulus_digit in enumerate(modulus_digits):
+            j = layer - i
+            if 0 <= j < len(quotient_layers):
+                expression = [x - modulus_digit * y for x, y in
+                              zip(expression, quotient_layers[j])]
+        if layer < len(target_digits):
+            expression = [x - y for x, y in
+                          zip(expression, target_digits[layer])]
+        if any(value % base for value in expression):
+            raise ValueError(f"q88 bridge carry {layer} is not integral")
+        previous = [value // base for value in expression]
+        carries.append(previous)
+    if any(previous):
+        raise ValueError("q88 bridge has nonzero terminal carry")
+    bridge = LinearCRTBridge(
+        base, matrix_digits, witness_layers, modulus_digits, target_digits,
+        quotient_layers, tuple(tuple(layer) for layer in carries))
+    bridge.verify()
+    return bridge
