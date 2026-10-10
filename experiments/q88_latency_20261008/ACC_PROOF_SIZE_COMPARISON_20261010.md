@@ -188,3 +188,8 @@ This is the comparison baseline for the full bridge.  The earlier 193.78 KiB
 value is a lower sample from the same profile; proof framing is challenge and
 parameter dependent, so the comparison must use the same serialized envelope
 format and repeated-show protocol.
+
+A two-show scalar-refresh rerun produced envelopes of **193.75 KiB** and
+**193.78 KiB** (complete show packets 218.97 and 219.00 KiB), with prove times
+4.820/4.626 s and verify times 2.574/2.429 s.  These are the current like-for-
+like production comparison values.
