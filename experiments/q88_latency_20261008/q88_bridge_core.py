@@ -519,26 +519,23 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
     equation_count = bridge.equation_count()
     statement = proof_statement(
         [degree] * len(vectors), [vector.dim for vector in vectors], norms,
-        num_constraints=equation_count, primesize="38", zk=zk)
+        num_constraints=equation_count, primesize="38", zk=zk, debug=True)
     indices = [statement.append_witness(vector) for vector in vectors]
     ref_to_index = {ref: index for ref, index in zip(witness_refs, indices)}
     zero = poly_t(ring, [0] * degree)
-    base_digits = [
-        [((bridge.q_digits[layer] >> (7 * digit)) & 127)
-         for _ in range(degree)]
-        for layer in range(len(bridge.q_digits))
-        for digit in []
-    ]
     # Public modulus digits are already stored as scalar coefficients in q_digits.
     for layer in range(equation_count):
         terms = []
         witnesses = []
-        for start in range(0, columns, group_size):
-            end = min(start + group_size, columns)
-            for public_layer in range(len(bridge.h_digits[start])):
-                witness_layer = layer - public_layer
-                if not 0 <= witness_layer < len(bridge.w_digits[start]):
-                    continue
+        # Keep the same layer-first convolution order as the reference
+        # grouped Pack adapter: witness digit l is paired with public digit
+        # j=layer-l.  This also makes the witness-index mapping explicit.
+        for witness_layer in range(len(bridge.w_digits[0])):
+            public_layer = layer - witness_layer
+            if not 0 <= public_layer < len(bridge.h_digits[0]):
+                continue
+            for start in range(0, columns, group_size):
+                end = min(start + group_size, columns)
                 block = [bridge.h_digits[index][public_layer]
                          for index in range(start, end)]
                 pv = polyvec_t(ring, len(block))
