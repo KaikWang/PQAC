@@ -282,3 +282,27 @@ envelope by 17.44--17.91 KiB (about 9.0--9.2%).  It does not yet meet the
 4 s / 2 s latency target.  The 170.7 KiB result above remains a main-relation
 bridge measurement only; the 176.31 KiB result is the first complete single-Pack
 measurement with the full security constraint set.
+
+## 2026-10-11: baseline time optimizations applied to complete Pack
+
+The complete acceptance function now inherits the production worker's
+relation-preserving tuning when called standalone: twelve OpenMP workers,
+parallel witness/statement/LDD preparation, Gaussian and refresh worker pools,
+witness/dynamic binding caches, lazy rotation scratch, and the production
+`PACK_IMPROVE_THRESHOLD=0.50`. The transcript-sensitive Pack reducer remains
+serial. On `autodl-pqa11`, the optimized run passed clear verification, both
+Pack verifications, serialization, and deserialization:
+
+```text
+Pack Prove:             5.533 s
+Pack Verify:             2.947 s
+serialized proof:       198338 bytes = 193.69 KiB
+deserialized Pack Verify: passed
+```
+
+This is a substantial improvement over the uncached direct invocation
+(12.220/7.618 s), but it does not reach 3/1.5 s. Setting reducer threads to 2
+was slower (5.805/3.106 s); disabling Pack splitting failed with “No LNP params
+found, ZK not possible”. Direct right-side quadratic substitution remained
+valid but regressed to 14.880/7.702 s. Four-limb compact witness mode failed
+the native norm check, so none of these unsafe or slower variants is enabled.

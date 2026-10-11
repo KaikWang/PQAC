@@ -681,6 +681,46 @@ def build_complete_single_pack_statement(public, prover, link=None, *,
     scope.  Passing ``None`` explicitly requests accumulator-only scope and
     is rejected when the caller asks for the complete manifest.
     """
+    # Carry over the production worker's relation-preserving parallel setup
+    # when this acceptance gate is called directly (outside the worker).  All
+    # values are defaults so deployments can still override them explicitly.
+    import os
+    tuning_defaults = {
+        "OMP_NUM_THREADS": "12",
+        "REVAC_LABRADOR_THREADS": "1",  # transcript-sensitive reducer
+        "REVAC_LABRADOR_GAUSSIAN_THREADS": "8",
+        "REVAC_LABRADOR_STATEMENT_THREADS": "8",
+        "REVAC_LABRADOR_PYTHON_STATEMENT_THREADS": "8",
+        "REVAC_LABRADOR_QUADG_THREADS": "8",
+        "REVAC_LABRADOR_GARBAGE_PARALLEL": "1",
+        "REVAC_LABRADOR_ROTATION_THREADS": "8",
+        "REVAC_LABRADOR_POLXVEC_SCALAR_THREADS": "8",
+        "REVAC_LABRADOR_FROMPOLY_THREADS": "8",
+        "REVAC_LABRADOR_REFRESH_THREADS": "8",
+        "REVAC_LABRADOR_EXACT_REFRESH_THREADS": "8",
+        "REVAC_LABRADOR_DCH_ADDCHECK_PARALLEL": "1",
+        "REVAC_LABRADOR_LDD_PROJECTION_THREADS": "8",
+        "REVAC_LABRADOR_LDD_PROJECTION_PARALLEL": "1",
+        "REVAC_LABRADOR_LDD_LING_THREADS": "12",
+        "REVAC_LABRADOR_LDD_LING_PARALLEL": "1",
+        "REVAC_LABRADOR_LDD_COLLAPSE_JL_THREADS": "4",
+        "REVAC_LABRADOR_LDD_COLLAPSE_JL_PARALLEL": "1",
+        "REVAC_LABRADOR_LDD_ZQ_THREADS": "4",
+        "REVAC_LABRADOR_LDD_ZQ_PARALLEL": "1",
+        "REVAC_LABRADOR_LDD_JL_SPROD_THREADS": "8",
+        "REVAC_LABRADOR_LDD_JL_SPROD_PARALLEL": "1",
+        "REVAC_LABRADOR_LDD_LIFT_THREADS": "4",
+        "REVAC_LABRADOR_LDD_LIFT_PARALLEL": "1",
+        "REVAC_LABRADOR_LDD_PARALLEL": "1",
+        "REVAC_LABRADOR_POLXVEC_PARALLEL": "1",
+        "REVAC_LABRADOR_DYNAMIC_BIND_CACHE": "1",
+        "REVAC_LABRADOR_WITNESS_CACHE": "1",
+        "REVAC_LABRADOR_ROTATION_LAZY_SCRATCH": "1",
+        "REVAC_LABRADOR_PACK_IMPROVE_THRESHOLD": "0.50",
+    }
+    for name, value in tuning_defaults.items():
+        os.environ.setdefault(name, value)
+
     from revac_acc96_wire import HANDLE_BITS
     if link is None:
         raise ValueError(
