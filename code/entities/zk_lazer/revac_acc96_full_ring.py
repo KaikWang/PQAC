@@ -437,6 +437,7 @@ def build_statement_full_ring(
             for bit in range(start, end)
         ], accumulator_witness=True,
             approx_requirement=(
+                None if compact_witness else
                 _pack_approx_norm_sq_floor() // len(handle_slices)))
         for start, end in handle_slices]
         for limb in range(proof_limb_count)]
@@ -463,10 +464,11 @@ def build_statement_full_ring(
 
     aggregate_idx: list[list[list[int]]] = []
     if not direct_right_quadratics:
-        aggregate_aux_requirement = _next_power_of_two(math.ceil(
-            LANES * aggregate_limb_count *
-                    _coefficient_bound(HANDLE_BITS * DEGREE_MULTIPLE) *
-            JL_INF_SLACK * JL_INF_SLACK))
+        aggregate_aux_requirement = None if compact_witness else \
+            _next_power_of_two(math.ceil(
+                LANES * aggregate_limb_count *
+                        _coefficient_bound(HANDLE_BITS * DEGREE_MULTIPLE) *
+                JL_INF_SLACK * JL_INF_SLACK))
         for lane in range(LANES):
             total = np.zeros((HANDLE_BITS, N), dtype=np.int64)
             gadget_scale = 1
@@ -487,6 +489,7 @@ def build_statement_full_ring(
                 lane_indices.append([
                     append_vector(
                         digit_values[start:end],
+                        accumulator_witness=compact_witness,
                         approx_requirement=aggregate_aux_requirement)
                     for start, end in handle_slices])
             aggregate_idx.append(lane_indices)

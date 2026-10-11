@@ -338,3 +338,15 @@ The quadratic-addcheck team was then raised from 8 to an adaptive
 verify**, with a 198338-byte proof and all verification checks passing. This is
 now the default for the complete API; it improves verification but does not
 yet reach 1.5 s or reduce the proving core below 3 s.
+
+## 2026-10-11: compact witness norm correction
+
+The compact four-limb profile previously failed because its aggregate and right
+gadget vectors still inherited the old four-limb approximation floor. The
+compiler now derives those bounds from the compact radix and marks aggregate
+limbs as compact accumulator witnesses. The full CRT statement then passes
+clear verification, Pack Verify, serialization, deserialization, and the second
+Pack Verify. A representative run measured **5.743 s prove / 2.438 s verify**
+and **199074 bytes = 194.41 KiB**. The profile is relation-preserving but is
+not enabled as the default: parameter rounding keeps the Pack layout nearly
+unchanged, so it does not yet provide a stable proving-time win.
