@@ -141,6 +141,46 @@ def verify_recombination(combined: Sequence[int],
                 raise ValueError("q88 CRT recombination mismatch")
 
 
+def build_shared_crt_aggregate(lane_polys: Sequence[Sequence[int]]) -> tuple[
+        list[int], list[list[int]]]:
+    """Build one exact CRT aggregate and its lane quotient witnesses.
+
+    For every coefficient this returns ``A`` and quotients ``k_l`` satisfying
+    ``A = lane_l + LANE_MODULI[l] * k_l`` over the integers.  The quotients
+    are kept as signed values and are not reduced modulo a proof prime; the
+    native bridge must range-bound and radix-decompose them explicitly.
+    """
+    combined = crt_recombine_poly(lane_polys)
+    quotients = []
+    for lane, modulus in enumerate(LANE_MODULI):
+        quotients.append([
+            (int(value) - int(lane_polys[lane][index])) // modulus
+            for index, value in enumerate(combined)
+        ])
+    for lane, modulus in enumerate(LANE_MODULI):
+        for index, value in enumerate(combined):
+            if int(value) != (int(lane_polys[lane][index]) +
+                              modulus * quotients[lane][index]):
+                raise ValueError("q88 shared CRT quotient reconstruction failed")
+    return combined, quotients
+
+
+def verify_shared_crt_aggregate(combined: Sequence[int],
+                                lane_polys: Sequence[Sequence[int]],
+                                quotients: Sequence[Sequence[int]]) -> None:
+    """Fail closed unless a shared aggregate and all lane quotients match."""
+    if len(lane_polys) != len(LANE_MODULI) or len(quotients) != len(LANE_MODULI):
+        raise ValueError("q88 shared CRT lane count mismatch")
+    if any(len(poly) != len(combined) or len(quotients[lane]) != len(combined)
+           for lane, poly in enumerate(lane_polys)):
+        raise ValueError("q88 shared CRT polynomial degree mismatch")
+    for lane, modulus in enumerate(LANE_MODULI):
+        for index, value in enumerate(combined):
+            if int(value) != (int(lane_polys[lane][index]) +
+                              modulus * int(quotients[lane][index])):
+                raise ValueError("q88 shared CRT quotient mismatch")
+
+
 def balanced_radix(value: int, *, base: int = 128,
                    digits: int | None = None) -> list[int]:
     """Encode one integer with centered radix digits and exact capacity checks."""
