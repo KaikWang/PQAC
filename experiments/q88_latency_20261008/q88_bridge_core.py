@@ -662,3 +662,83 @@ class FastBridge:
 
     def equation_count(self):
         return len(self.carry_digits)
+
+
+def build_complete_single_pack_statement(public, prover, link=None, *,
+                                         cache=None,
+                                         check_witness=True):
+    """Build the security-complete q88 single Pack statement.
+
+    The experimental CRT bridge above deliberately owns only the lifted main
+    accumulator equation.  Hidden handle bits, refresh selectors, exact CRT
+    lifts, and the four q19 same-handle rows are already implemented and
+    audited by the production degree-4096 compiler.  Reusing that compiler
+    here keeps those quadratic constraints in the *same* native
+    ``proof_statement`` instead of silently replacing them with public
+    coefficients.
+
+    ``link`` must be a decoded ``LinkPayload`` for the full anonymous-show
+    scope.  Passing ``None`` explicitly requests accumulator-only scope and
+    is rejected when the caller asks for the complete manifest.
+    """
+    from revac_acc96_wire import HANDLE_BITS
+    if link is None:
+        raise ValueError(
+            "complete q88 single Pack requires the q19 LinkPayload; "
+            "use the production accumulator-only path explicitly otherwise")
+    from revac_acc96_full_ring import build_statement_full_ring
+
+    statement, params, proof = build_statement_full_ring(
+        public, prover, link, prove=False, check_witness=check_witness,
+        cache=cache)
+    expected = getattr(statement, "num_constraints", 0)
+    if expected < 3 + 4:
+        raise ValueError("complete q88 statement is missing required constraints")
+    if getattr(statement, "cur_constraint_num", 0) != expected:
+        raise ValueError("complete q88 constraint accounting mismatch")
+    if getattr(statement, "cur_int_constraint_num", 0) < HANDLE_BITS:
+        raise ValueError("complete q88 hidden-handle binary constraints missing")
+    return statement, params, proof
+
+
+def prove_complete_single_pack(public, prover, link, *, cache=None,
+                               check_witness=True):
+    """Prove, verify, serialize, deserialize, and reverify full q88 Pack.
+
+    This is the executable acceptance gate for the complete statement.  It
+    deliberately goes through ``build_statement_full_ring`` so the hidden
+    handle, refresh, lift, and q19 constraints cannot be omitted by an
+    experimental bridge caller.
+    """
+    import time
+    from labrados import ffi, lib, pack_verify
+
+    statement, _unused_params, _unused_proof = \
+        build_complete_single_pack_statement(
+            public, prover, link, cache=cache,
+            check_witness=check_witness)
+    prove_started = time.perf_counter()
+    error, params, proof = statement.pack_prove()
+    prove_seconds = time.perf_counter() - prove_started
+    if error:
+        raise RuntimeError(f"complete q88 Pack Prove failed: {error}")
+    verify_started = time.perf_counter()
+    if not pack_verify((params, proof), statement.output_statement(), "38"):
+        raise RuntimeError("complete q88 Pack Verify failed")
+    verify_seconds = time.perf_counter() - verify_started
+
+    size = lib.labrador38_py_proof_nbytes(params, proof)
+    serialized = ffi.new("uint8_t[]", size)
+    if lib.labrador38_py_proof_serialize(serialized, size, params, proof):
+        raise RuntimeError("complete q88 proof serialization failed")
+    decoded = ffi.new("labrador38_dch_pack_proof")
+    if lib.labrador38_py_proof_deserialize(decoded, params, serialized, size):
+        raise RuntimeError("complete q88 proof deserialization failed")
+    if not pack_verify((params, decoded), statement.output_statement(), "38"):
+        raise RuntimeError("complete q88 deserialized Pack Verify failed")
+    return {
+        "prove_seconds": prove_seconds,
+        "verify_seconds": verify_seconds,
+        "serialized_bytes": int(size),
+        "deserialized_verified": True,
+    }
