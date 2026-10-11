@@ -742,3 +742,22 @@ def prove_complete_single_pack(public, prover, link, *, cache=None,
         "serialized_bytes": int(size),
         "deserialized_verified": True,
     }
+
+
+def decode_complete_q88_dynamic(raw: bytes):
+    """Decode and cross-check the full prover-plus-q19-link payload.
+
+    The worker wire format is ``ProverPayload || LinkPayload``.  Keeping this
+    check in the bridge module prevents a complete-proof experiment from
+    accidentally pairing a q19 opening with a different accumulator or
+    handle.
+    """
+    from revac_acc96_wire import LINK_BYTES, PROVER_BYTES, LinkPayload, ProverPayload
+    if len(raw) != PROVER_BYTES + LINK_BYTES:
+        raise ValueError("complete q88 payload must contain prover and link data")
+    prover = ProverPayload(raw[:PROVER_BYTES])
+    link = LinkPayload.decode(raw[PROVER_BYTES:])
+    if link.accumulator_digest != prover.accumulator_digest:
+        raise ValueError("q19 link and accumulator digests do not match")
+    link.audit_relation(prover.handle_vector)
+    return prover, link
