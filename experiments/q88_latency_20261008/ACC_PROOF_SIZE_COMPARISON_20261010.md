@@ -350,3 +350,18 @@ Pack Verify. A representative run measured **5.743 s prove / 2.438 s verify**
 and **199074 bytes = 194.41 KiB**. The profile is relation-preserving but is
 not enabled as the default: parameter rounding keeps the Pack layout nearly
 unchanged, so it does not yet provide a stable proving-time win.
+
+## 2026-10-11: nmax and baseline comparison
+
+The native profile reports `input_r=5`, `nn=91416`, and a selected `nmax` near
+559. Forcing `REVAC_LABRADOR_FIRST_TARGET_NMAX=500` remained verifiable but
+slowed Pack Prove to about 7.86 s and Pack Verify to 3.27 s. Forcing 620 also
+slowed the run to about 7.54/3.25 s. Changing the first parameter target does
+not reduce the effective folding work.
+
+For a same-host comparison, the production q88 worker was rerun on
+`autodl-pqa11` with the current baseline profile and measured **5.756 s UAV
+generation / 2.842 s GCS verification**, with a 193.75 KiB accumulator envelope.
+The complete CRT Pack path is therefore currently within baseline variation;
+the earlier 4.6/2.4 s samples are not a stable lower bound. A real 3/1.5 s
+result requires reducing `nn`/witness dimensions, not retuning `nmax`.
