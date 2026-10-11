@@ -923,7 +923,11 @@ def build_statement_full_ring(
         _q96_timing("full-ring append q19 link", stage_started)
 
     if ps.cur_constraint_num != constraint_count:
-        raise ValueError("q88 full-ring constraint accounting mismatch")
+        raise ValueError(
+            "q88 full-ring constraint accounting mismatch: "
+            f"actual={ps.cur_constraint_num}, expected={constraint_count}, "
+            f"refresh={refresh_constraints}, aggregate={aggregation_constraints}, "
+            f"link={4 if link is not None else 0}")
     if ps.cur_int_constraint_num != HANDLE_BITS:
         raise ValueError("q88 full-ring handle-binding accounting mismatch")
     if check_witness and cache is None and int(ps.simple_verify(
