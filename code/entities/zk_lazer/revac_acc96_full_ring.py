@@ -26,7 +26,7 @@ from revac_acc96_wire import (
 from revac_profile_generated import PROOF_MODULUS
 
 from revac_acc96_memver_labrador import (
-    AGGREGATE_SLICES, JL_INF_SLACK,
+    JL_INF_SLACK,
     REFRESH_AHAT_LIMBS, VECTOR_COEFF_BOUND,
     Q96StatementCache, _aggregated_quadratics_enabled, _audit_norm_profile,
     _balanced_radix_limbs, _next_power_of_two, _proof_center,
@@ -248,6 +248,7 @@ def build_statement_full_ring(
                            LANES * REFRESH_BLOCKS)
     direct_right_quadratics = _direct_right_quadratics_enabled()
     compact_witness = _compact_witness_enabled()
+    handle_slices = _handle_slices()
     proof_limb_count = (_compact_witness_limb_count()
                         if compact_witness else WITNESS_LIMBS)
     proof_limb_radix = (_compact_witness_radix(proof_limb_count)
@@ -255,7 +256,7 @@ def build_statement_full_ring(
     proof_limb_bound = proof_limb_radix // 2
     aggregate_limb_count = _aggregate_limb_count(proof_limb_radix)
     aggregation_constraints = (0 if direct_right_quadratics else
-                               LANES * len(AGGREGATE_SLICES))
+                               LANES * len(handle_slices))
     accumulator_constraints = LANES
     static_constraints = refresh_constraints + aggregation_constraints
     constraint_count = static_constraints + accumulator_constraints
@@ -394,7 +395,6 @@ def build_statement_full_ring(
                 accumulator_witness_indices.add(index)
         return index
 
-    handle_slices = _handle_slices()
     x_idx = [append_vector(
         _scalar_polynomials(prover.handle_vector[start:end], N), binary=True)
         for start, end in handle_slices]
