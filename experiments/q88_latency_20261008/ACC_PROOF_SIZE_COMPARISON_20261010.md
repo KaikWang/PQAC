@@ -229,3 +229,27 @@ serialized proof: 151066 bytes = 147.525 KiB
 This validates the Lazer-Acc grouped statement construction and serializer
 path.  It is not the complete q88 accumulator relation; the real q88 bridge
 still needs the 4096-degree witness input and all auxiliary binding equations.
+
+## 2026-10-11: real q88 main relation on autodl-pqa11
+
+The new host alias `autodl-pqa11` was configured for the user's port 10657
+endpoint and the authoritative local `OURS` plus modified lowercase `lazer`
+trees were synchronized one way from WSL.  The real degree-4096 CRT bridge
+initially failed native clear verification because raw carry coefficients can
+reach about 41047, beyond the signed 16-bit witness limb accepted by
+LaBRADOR.  Splitting each carry into three signed radix-128 witness layers
+fixed that failure.
+
+The resulting single Pack **main accumulator relation** passed on the new
+host:
+
+```text
+statement vectors: 63648
+constraints:       36
+Pack Verify:       passed
+serialized proof:   174869 bytes = 170.7705078125 KiB
+```
+
+This is not yet the full q88 proof.  Handle, refresh, lift-reconstruction and
+q19-link binding constraints still need to be appended to the same statement
+before comparing it with the 193.75--194.22 KiB production envelope.
