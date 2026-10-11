@@ -40,6 +40,62 @@ def full_ring_dimension_breakdown(*, compact_limbs: int = 4,
     }
 
 
+def pack_gadget_digit_pairs(digits: Sequence[Sequence[int]], *,
+                            base: int) -> tuple[list[list[int]], int]:
+    """Pack adjacent gadget digits and return the exact signed bound.
+
+    For digits ``d0..d5`` this returns ``d0+B*d1``, ``d2+B*d3`` and
+    ``d4+B*d5``.  The operation is integer-only and deliberately does not
+    reduce modulo a proof prime; callers must add the corresponding carry
+    reconstruction equations before using the packed values in a statement.
+    """
+    if base <= 1:
+        raise ValueError("gadget pair base must be greater than one")
+    if len(digits) == 0 or len(digits) % 2:
+        raise ValueError("gadget digits must contain an even nonzero count")
+    width = len(digits[0])
+    if any(len(row) != width for row in digits):
+        raise ValueError("gadget digit widths do not match")
+    packed = []
+    bound = 0
+    for index in range(0, len(digits), 2):
+        left, right = digits[index], digits[index + 1]
+        values = [int(a) + base * int(b) for a, b in zip(left, right)]
+        packed.append(values)
+        bound = max(bound, *(abs(value) for value in values))
+    return packed, bound
+
+
+def unpack_gadget_digit_pairs(packed: Sequence[Sequence[int]], *,
+                              base: int) -> list[list[int]]:
+    """Invert :func:`pack_gadget_digit_pairs` using balanced base digits."""
+    if base <= 1:
+        raise ValueError("gadget pair base must be greater than one")
+    result: list[list[int]] = []
+    half = base // 2
+    for row in packed:
+        low = []
+        high = []
+        for value in row:
+            digit = (int(value) + half) % base - half
+            low.append(digit)
+            high.append((int(value) - digit) // base)
+        result.extend((low, high))
+    return result
+
+
+def verify_gadget_digit_pairs(digits: Sequence[Sequence[int]], *,
+                              base: int) -> int:
+    """Return the maximum reconstruction error for a pair packing."""
+    packed, _ = pack_gadget_digit_pairs(digits, base=base)
+    recovered = unpack_gadget_digit_pairs(packed, base=base)
+    if len(recovered) != len(digits):
+        raise ValueError("gadget pair reconstruction count mismatch")
+    return max((abs(int(a) - int(b))
+                for left, right in zip(digits, recovered)
+                for a, b in zip(left, right)), default=0)
+
+
 def _crt_constants() -> tuple[int, ...]:
     constants = []
     for modulus in LANE_MODULI:
