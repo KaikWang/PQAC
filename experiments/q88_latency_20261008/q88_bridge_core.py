@@ -18,6 +18,28 @@ CRT_MODULUS = prod(LANE_MODULI)
 PACK_MODULUS = (1 << 38) - 107
 
 
+def full_ring_dimension_breakdown(*, compact_limbs: int = 4,
+                                  aggregate_ranks: tuple[int, ...] = (16, 8),
+                                  trunc_right: int = 22,
+                                  gadget_digits: int = 6,
+                                  lanes: int = 3) -> dict[str, int]:
+    """Estimate native witness-polynomial dimensions by relation component.
+
+    This is deliberately a structural audit, not a security parameter
+    selector.  It identifies the large truncation-right and handle-product
+    blocks before a quotient/carry rewrite is attempted.
+    """
+    phase_factor = 16  # degree-4096 native ring / degree-256 phase ring
+    rank_sum = sum(aggregate_ranks)
+    return {
+        "left_and_v12": 2 * compact_limbs * phase_factor,
+        "trunc_right": trunc_right * compact_limbs * phase_factor,
+        "handle_right": gadget_digits * compact_limbs * rank_sum * phase_factor,
+        "handle_aggregate": lanes * 6 * rank_sum * phase_factor,
+        "crt_lift": lanes * 4 * phase_factor,
+    }
+
+
 def _crt_constants() -> tuple[int, ...]:
     constants = []
     for modulus in LANE_MODULI:
