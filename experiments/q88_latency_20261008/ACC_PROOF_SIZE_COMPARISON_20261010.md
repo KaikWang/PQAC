@@ -306,3 +306,11 @@ was slower (5.805/3.106 s); disabling Pack splitting failed with “No LNP param
 found, ZK not possible”. Direct right-side quadratic substitution remained
 valid but regressed to 14.880/7.702 s. Four-limb compact witness mode failed
 the native norm check, so none of these unsafe or slower variants is enabled.
+
+Against the production baseline, this should not be reported as a performance
+win: the 193.69 KiB sample is effectively the same size as 193.75--194.22 KiB,
+while 5.533/2.947 s is slower than the baseline 4.626--4.960/2.429--2.782 s.
+The current result is an integration acceptance point only. A real speed or
+size claim now requires a lower-dimensional valid witness/Pack layout, or the
+resident online worker path; changing thread counts and fold thresholds alone
+is insufficient.
