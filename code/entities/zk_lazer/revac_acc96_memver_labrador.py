@@ -424,12 +424,17 @@ def _audit_norm_profile(
         dimensions: list[int], approximate_bounds: dict[int, int],
         accumulator_witness_indices: set[int],
         *, limb_radix: int = LIMB_RADIX,
-        limb_count: int = WITNESS_LIMBS) -> None:
+        limb_count: int = WITNESS_LIMBS,
+        public_norm_sq_bounds: dict[int, int] | None = None) -> None:
     if not accumulator_witness_indices <= approximate_bounds.keys():
         raise ValueError("q96 accumulator witness norm accounting is incomplete")
     for index, requirement in approximate_bounds.items():
+        deterministic_bound = (
+            public_norm_sq_bounds[index]
+            if public_norm_sq_bounds is not None and index in public_norm_sq_bounds
+            else _vector_bound(dimensions[index]))
         minimum = math.ceil(
-            _vector_bound(dimensions[index]) * JL_INF_SLACK * JL_INF_SLACK)
+            deterministic_bound * JL_INF_SLACK * JL_INF_SLACK)
         if requirement < minimum or requirement & (requirement - 1):
             raise ValueError("invalid q96 per-vector JL norm requirement")
 

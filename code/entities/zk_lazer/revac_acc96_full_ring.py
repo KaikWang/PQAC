@@ -153,6 +153,22 @@ def _aggregate_limb_count(radix: int) -> int:
     return limbs
 
 
+def _aggregate_digit_bound(radix: int, limbs: int, limb: int) -> int:
+    """Public bound for balanced digits of a centered proof-field residue.
+
+    Lower digits have absolute value at most floor(B/2).  Reconstruction
+    gives B^(k-1)|d_top| <= floor(q/2) + (B^(k-1)-1)/2.
+    This bound depends only on the field and encoding, never on a witness.
+    """
+    if not 0 <= limb < limbs:
+        raise ValueError("aggregate digit index outside decomposition")
+    if limb != limbs - 1:
+        return radix // 2
+    scale = radix ** limb
+    return min(radix // 2,
+               (PROOF_MODULUS // 2 + (scale - 1) // 2) // scale)
+
+
 def _scalar_refresh_bits_enabled() -> bool:
     """Keep the hidden Remark-4.3 selector in the degree-256 base ring."""
     return os.environ.get("REVAC_Q96_SCALAR_REFRESH_BITS", "0") != "0"
@@ -356,11 +372,13 @@ def build_statement_full_ring(
     backend_dimensions: list[int] = []
     norms: list[int] = []
     approximate_bounds: dict[int, int] = {}
+    public_norm_sq_bounds: dict[int, int] = {}
     accumulator_witness_indices: set[int] = set()
 
     def append_vector(polys: Any, degree: int = N, binary: bool = False,
                       exact_norm_sq: int | None = None,
                       accumulator_witness: bool = False,
+                      public_coefficient_bound: int | None = None,
                       approx_requirement: int | None = None) -> int:
         array = np.ascontiguousarray(polys, dtype=np.int64)
         if array.ndim == 1:
@@ -380,12 +398,16 @@ def build_statement_full_ring(
         else:
             coeff_bound = (proof_limb_bound if compact_witness and
                            accumulator_witness else VECTOR_COEFF_BOUND)
+            if public_coefficient_bound is not None:
+                coeff_bound = public_coefficient_bound
             coefficient_bound = (backend_dimension * PHASE_N *
                                  coeff_bound * coeff_bound)
             if coefficient_bound >= 1 << 64:
                 raise ValueError(
                     "q88 compact witness squared-norm exceeds uint64_t")
             norms.append(coefficient_bound)
+            if public_coefficient_bound is not None:
+                public_norm_sq_bounds[index] = coefficient_bound
             derived_requirement = _next_power_of_two(math.ceil(
                 coefficient_bound * JL_INF_SLACK * JL_INF_SLACK))
             approximate_bounds[index] = (
@@ -511,13 +533,20 @@ def build_statement_full_ring(
             total %= PROOF_MODULUS
             total[total > PROOF_MODULUS // 2] -= PROOF_MODULUS
             lane_indices = []
-            for digit_values in _balanced_radix_limbs(
-                    total, aggregate_limb_count, radix=proof_limb_radix):
+            for aggregate_limb, digit_values in enumerate(_balanced_radix_limbs(
+                    total, aggregate_limb_count, radix=proof_limb_radix)):
+                tight_aggregate_norm = os.environ.get(
+                    "REVAC_Q96_AGGREGATE_TIGHT_NORM", "0") != "0"
+                digit_bound = _aggregate_digit_bound(
+                    proof_limb_radix, aggregate_limb_count, aggregate_limb)
                 lane_indices.append([
                     append_vector(
                         digit_values[start:end],
-                        accumulator_witness=compact_witness,
-                        approx_requirement=aggregate_aux_requirement)
+                        public_coefficient_bound=(
+                            digit_bound if tight_aggregate_norm else None),
+                        accumulator_witness=compact_witness and not tight_aggregate_norm,
+                        approx_requirement=(None if tight_aggregate_norm else
+                                            aggregate_aux_requirement))
                     for start, end in handle_slices])
             aggregate_idx.append(lane_indices)
 
@@ -554,7 +583,8 @@ def build_statement_full_ring(
         raise ValueError("q88 full-ring witness layout accounting mismatch")
     _audit_norm_profile(
         backend_dimensions, approximate_bounds, accumulator_witness_indices,
-        limb_radix=proof_limb_radix, limb_count=proof_limb_count)
+        limb_radix=proof_limb_radix, limb_count=proof_limb_count,
+        public_norm_sq_bounds=public_norm_sq_bounds)
     approx_norm_list = list(approximate_bounds.items())
     _q96_timing("full-ring prepare witness views", build_started)
 

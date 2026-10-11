@@ -211,6 +211,8 @@ def _bind_deployment_profile(entry: dict[str, Any], context_hash: bytes,
             "REVAC_Q96_COMPACT_WITNESS_RADIX", "auto").encode("ascii")
         handle_slices = os.environ.get(
             "REVAC_Q96_HANDLE_SLICES", "16,8").encode("ascii")
+        aggregate_tight_norm = os.environ.get(
+            "REVAC_Q96_AGGREGATE_TIGHT_NORM", "0").encode("ascii")
         scalar_refresh = os.environ.get(
             "REVAC_Q96_SCALAR_REFRESH_BITS", "0").encode("ascii")
         if os.environ.get("REVAC_Q96_DIRECT_RIGHT_QUAD", "0") != "0":
@@ -222,6 +224,7 @@ def _bind_deployment_profile(entry: dict[str, Any], context_hash: bytes,
                             b"-count" + compact_count +
                             b"-radix" + compact_radix +
                             b"-handle-slices" + handle_slices +
+                            b"-aggregate-tight-norm" + aggregate_tight_norm +
                             b"-scalar-refresh" + scalar_refresh +
                             b"-compact-hash")
     elif _aggregated_quadratics_enabled():
