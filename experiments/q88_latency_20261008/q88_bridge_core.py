@@ -590,8 +590,9 @@ def compile_linear_crt_bridge_fast(matrix, witness, target, *,
     Pack statement still proves the resulting digit equations.  The helper is
     optional so the small reference compiler remains dependency-free.
     """
-    if base != 128:
-        raise ValueError("fast q88 bridge currently requires radix 128")
+    if base < 2 or base & (base - 1):
+        raise ValueError("fast q88 bridge radix must be a power of two")
+    base_bits = base.bit_length() - 1
     try:
         from exact_negacyclic_fft import digit_sum_negacyclic
     except ImportError as exc:
@@ -604,8 +605,8 @@ def compile_linear_crt_bridge_fast(matrix, witness, target, *,
                                            for lane in range(3)])
                      for column in range(columns)]
     lifted_target = crt_lift_polynomial(target)
-    conv = digit_sum_negacyclic(lifted_matrix, witness, 7,
-                                 (CRT_MODULUS.bit_length() + 6) // 7,
+    conv = digit_sum_negacyclic(lifted_matrix, witness, base_bits,
+                                 (CRT_MODULUS.bit_length() + base_bits - 1) // base_bits,
                                  witness_digits)
     total = [sum(conv[layer][k] * (base ** layer)
                  for layer in range(len(conv))) for k in range(degree)]
@@ -615,7 +616,7 @@ def compile_linear_crt_bridge_fast(matrix, witness, target, *,
         if diff % CRT_MODULUS:
             raise ValueError("q88 fast bridge congruence failed")
         quotient.append(diff // CRT_MODULUS)
-    h_count = (CRT_MODULUS.bit_length() + 6) // 7
+    h_count = (CRT_MODULUS.bit_length() + base_bits - 1) // base_bits
     h = [_decompose(poly, base, h_count, signed=False)
          for poly in lifted_matrix]
     w = [_decompose(poly, base, witness_digits, signed=True)
