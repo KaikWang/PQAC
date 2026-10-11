@@ -351,6 +351,15 @@ and **199074 bytes = 194.41 KiB**. The profile is relation-preserving but is
 not enabled as the default: parameter rounding keeps the Pack layout nearly
 unchanged, so it does not yet provide a stable proving-time win.
 
+After correcting the aggregate norm bound, the compact four-limb profile was
+dimension-audited: native Pack input fell from `nn=91416` and 20192 witness
+polynomials to `nn=83450` and 16352 witness polynomials, an 8.7% reduction.
+The complete API now enables this profile by default while keeping the q88 wire
+format unchanged. A fresh run passed all verification and measured **5.391 s
+prove / 2.745 s verify**, with a 199138-byte proof. The reduction is real but
+still insufficient for 3/1.5 s because parameter rounding leaves the dominant
+folding layout largely unchanged.
+
 ## 2026-10-11: nmax and baseline comparison
 
 The native profile reports `input_r=5`, `nn=91416`, and a selected `nmax` near

@@ -722,6 +722,11 @@ def build_complete_single_pack_statement(public, prover, link=None, *,
         "REVAC_LABRADOR_WITNESS_CACHE": "1",
         "REVAC_LABRADOR_ROTATION_LAZY_SCRATCH": "1",
         "REVAC_LABRADOR_PACK_IMPROVE_THRESHOLD": "0.50",
+        # Four compact proof-only limbs reduce the native witness dimension
+        # while retaining the five-limb q88 wire representation.  The full
+        # ring compiler derives the corresponding norm bounds exactly.
+        "REVAC_Q96_COMPACT_WITNESS_LIMBS": "1",
+        "REVAC_Q96_COMPACT_WITNESS_COUNT": "4",
     }
     for name, value in tuning_defaults.items():
         os.environ.setdefault(name, value)
