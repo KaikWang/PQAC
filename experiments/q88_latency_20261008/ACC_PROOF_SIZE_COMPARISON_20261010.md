@@ -259,3 +259,26 @@ until all binding constraints are included.
 This is not yet the full q88 proof.  Handle, refresh, lift-reconstruction and
 q19-link binding constraints still need to be appended to the same statement
 before comparing it with the 193.75--194.22 KiB production envelope.
+
+## 2026-10-11: complete CRT single-Pack acceptance run on autodl-pqa11
+
+The complete dynamic worker payload (`ProverPayload || LinkPayload`) was decoded
+and cross-checked before statement construction.  The production full-ring
+quadratic builder then included the hidden-handle binding, refresh selector and
+product binding, all three CRT lift reconstruction constraints, and the four
+q19 link rows with shared-handle binding in one native statement.  Clear
+witness checks passed.  Pack Prove, Pack Verify, serialization, deserialization,
+and Pack Verify of the deserialized proof all passed:
+
+```text
+Pack Prove:             12.2195369601 s
+Pack Verify:             7.6178674698 s
+serialized proof:       180542 bytes = 176.310546875 KiB
+deserialized Pack Verify: passed
+```
+
+The complete proof is therefore smaller than the 193.75--194.22 KiB production
+envelope by 17.44--17.91 KiB (about 9.0--9.2%).  It does not yet meet the
+4 s / 2 s latency target.  The 170.7 KiB result above remains a main-relation
+bridge measurement only; the 176.31 KiB result is the first complete single-Pack
+measurement with the full security constraint set.
