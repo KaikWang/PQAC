@@ -688,6 +688,10 @@ def build_complete_single_pack_statement(public, prover, link=None, *,
     tuning_defaults = {
         "OMP_NUM_THREADS": "12",
         "REVAC_LABRADOR_THREADS": "1",  # transcript-sensitive reducer
+        # Verification kernels have disjoint outputs and can use a wider
+        # native team; keep proving serial for transcript/reducer stability.
+        "REVAC_LABRADOR_THREADS_VERIFY": str(
+            min(6, max(1, os.cpu_count() or 1))),
         "REVAC_LABRADOR_GAUSSIAN_THREADS": "8",
         "REVAC_LABRADOR_STATEMENT_THREADS": "8",
         "REVAC_LABRADOR_PYTHON_STATEMENT_THREADS": "8",
@@ -753,6 +757,8 @@ def prove_complete_single_pack(public, prover, link, *, cache=None,
     """
     import time
     from labrados import ffi, lib, pack_verify
+    from revac_acc_memver_worker import (
+        native_thread_scope, verify_aggregation_parallel_scope)
 
     if cache is None:
         statement, _unused_params, _unused_proof = \
@@ -760,7 +766,9 @@ def prove_complete_single_pack(public, prover, link, *, cache=None,
                 public, prover, link, cache=None,
                 check_witness=check_witness)
         prove_started = time.perf_counter()
-        error, params, proof = statement.pack_prove()
+        with (native_thread_scope("prove"),
+              verify_aggregation_parallel_scope("prove")):
+            error, params, proof = statement.pack_prove()
         prove_seconds = time.perf_counter() - prove_started
         if error:
             raise RuntimeError(f"complete q88 Pack Prove failed: {error}")
@@ -774,15 +782,20 @@ def prove_complete_single_pack(public, prover, link, *, cache=None,
                 check_witness=check_witness)
         from revac_acc96_full_ring import build_statement_full_ring
         prove_started = time.perf_counter()
-        statement, params, proof = build_statement_full_ring(
-            public, prover, link, prove=True,
-            check_witness=False, cache=cache,
-            reuse_accumulator_witness=reuse_accumulator_witness)
+        with (native_thread_scope("prove"),
+              verify_aggregation_parallel_scope("prove")):
+            statement, params, proof = build_statement_full_ring(
+                public, prover, link, prove=True,
+                check_witness=False, cache=cache,
+                reuse_accumulator_witness=reuse_accumulator_witness)
         prove_seconds = time.perf_counter() - prove_started
         if proof is None or params is None:
             raise RuntimeError("complete q88 resident Pack Prove returned no proof")
     verify_started = time.perf_counter()
-    if not pack_verify((params, proof), statement.output_statement(), "38"):
+    with (native_thread_scope("verify"),
+          verify_aggregation_parallel_scope("verify")):
+        verified = pack_verify((params, proof), statement.output_statement(), "38")
+    if not verified:
         raise RuntimeError("complete q88 Pack Verify failed")
     verify_seconds = time.perf_counter() - verify_started
 
@@ -793,7 +806,11 @@ def prove_complete_single_pack(public, prover, link, *, cache=None,
     decoded = ffi.new("labrador38_dch_pack_proof")
     if lib.labrador38_py_proof_deserialize(decoded, params, serialized, size):
         raise RuntimeError("complete q88 proof deserialization failed")
-    if not pack_verify((params, decoded), statement.output_statement(), "38"):
+    with (native_thread_scope("verify"),
+          verify_aggregation_parallel_scope("verify")):
+        decoded_verified = pack_verify(
+            (params, decoded), statement.output_statement(), "38")
+    if not decoded_verified:
         raise RuntimeError("complete q88 deserialized Pack Verify failed")
     return {
         "prove_seconds": prove_seconds,

@@ -321,3 +321,9 @@ second cached run avoided statement construction and parameter generation, but
 the cryptographic core still measured about **6.14 s prove / 3.32 s verify**.
 This confirms that the remaining gap is in the Pack proof/reduction itself,
 not Python statement setup.
+
+The complete API also now enters the production worker's native prove/verify
+thread scopes. A verification phase override of six native threads reduced one
+cached verification sample to **2.625 s** with Pack Verify still passing; proof
+generation remained above 7 s in that run. This is a verification-side
+improvement only and does not meet the 3 s / 1.5 s target.
