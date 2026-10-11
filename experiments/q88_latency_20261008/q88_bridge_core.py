@@ -766,8 +766,7 @@ def prove_complete_single_pack(public, prover, link, *, cache=None,
                 public, prover, link, cache=None,
                 check_witness=check_witness)
         prove_started = time.perf_counter()
-        with (native_thread_scope("prove"),
-              verify_aggregation_parallel_scope("prove")):
+        with native_thread_scope("prove"):
             error, params, proof = statement.pack_prove()
         prove_seconds = time.perf_counter() - prove_started
         if error:
@@ -782,8 +781,7 @@ def prove_complete_single_pack(public, prover, link, *, cache=None,
                 check_witness=check_witness)
         from revac_acc96_full_ring import build_statement_full_ring
         prove_started = time.perf_counter()
-        with (native_thread_scope("prove"),
-              verify_aggregation_parallel_scope("prove")):
+        with native_thread_scope("prove"):
             statement, params, proof = build_statement_full_ring(
                 public, prover, link, prove=True,
                 check_witness=False, cache=cache,
