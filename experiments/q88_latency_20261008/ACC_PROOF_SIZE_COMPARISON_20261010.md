@@ -314,3 +314,10 @@ The current result is an integration acceptance point only. A real speed or
 size claim now requires a lower-dimensional valid witness/Pack layout, or the
 resident online worker path; changing thread counts and fold thresholds alone
 is insufficient.
+
+The complete Pack API now accepts `Q96StatementCache` and reuses the resident
+statement, static witness views, Pack parameters, and transcript prefix. The
+second cached run avoided statement construction and parameter generation, but
+the cryptographic core still measured about **6.14 s prove / 3.32 s verify**.
+This confirms that the remaining gap is in the Pack proof/reduction itself,
+not Python statement setup.
