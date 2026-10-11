@@ -250,6 +250,12 @@ Pack Verify:       passed
 serialized proof:   174869 bytes = 170.7705078125 KiB
 ```
 
+A timed rerun on the same host measured Pack Prove **12.393 s**, Pack Verify
+**8.736 s**, and serialization **174805 bytes = 170.7080078125 KiB**.  The
+small byte variation is from randomized proof generation.  These timings are
+for the main relation only and are not comparable as a complete q88 proof
+until all binding constraints are included.
+
 This is not yet the full q88 proof.  Handle, refresh, lift-reconstruction and
 q19-link binding constraints still need to be appended to the same statement
 before comparing it with the 193.75--194.22 KiB production envelope.
