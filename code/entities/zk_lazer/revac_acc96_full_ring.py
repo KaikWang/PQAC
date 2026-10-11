@@ -38,6 +38,33 @@ from revac_acc96_memver_labrador import (
 DEGREE_MULTIPLE = N // PHASE_N
 
 
+def _handle_slices() -> tuple[tuple[int, int], ...]:
+    """Select a partition of the 24 handle bits for aggregate gadgets.
+
+    The relation is unchanged by the partition: each slice is still bound by
+    one linear reconstruction constraint and one accumulator quadratic.  A
+    single slice removes the six per-lane aggregate constraints used by the
+    historical 16+8 layout and lets the native backend process fewer
+    statement rows.  Keep the legacy partition as the default for cache and
+    wire compatibility; the alternate layouts are explicit experiments.
+    """
+    layout = os.environ.get("REVAC_Q96_HANDLE_SLICES", "16,8")
+    try:
+        widths = tuple(int(part.strip()) for part in layout.split(",")
+                       if part.strip())
+    except ValueError as exc:
+        raise ValueError("q88 handle slice widths must be comma-separated") from exc
+    if not widths or any(width <= 0 for width in widths) or sum(widths) != HANDLE_BITS:
+        raise ValueError(
+            f"q88 handle slices must be positive and sum to {HANDLE_BITS}")
+    start = 0
+    slices = []
+    for width in widths:
+        slices.append((start, start + width))
+        start += width
+    return tuple(slices)
+
+
 def _direct_right_quadratics_enabled() -> bool:
     """Use the original bounded right limbs directly in the q88 products.
 
@@ -367,7 +394,7 @@ def build_statement_full_ring(
                 accumulator_witness_indices.add(index)
         return index
 
-    handle_slices = AGGREGATE_SLICES
+    handle_slices = _handle_slices()
     x_idx = [append_vector(
         _scalar_polynomials(prover.handle_vector[start:end], N), binary=True)
         for start, end in handle_slices]
