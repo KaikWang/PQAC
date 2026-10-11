@@ -332,3 +332,9 @@ The prove scope was corrected to preserve the existing disjoint-output
 parallelism; applying the verifier-only scope to proving caused a regression.
 The corrected standalone run measured **5.590 s prove / 2.775 s verify**, with
 both Pack checks and deserialization verification passing.
+
+The quadratic-addcheck team was then raised from 8 to an adaptive
+`min(12, cpu_count)` budget. One complete run measured **5.661 s prove / 2.560 s
+verify**, with a 198338-byte proof and all verification checks passing. This is
+now the default for the complete API; it improves verification but does not
+yet reach 1.5 s or reduce the proving core below 3 s.
