@@ -487,6 +487,23 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
         raise ValueError("group size must be positive")
     degree = bridge.degree
     ring = polyring_t(degree, PACK_MODULUS)
+    # Labrador witness coefficients are stored in signed 16-bit limbs.  The
+    # raw quotient/carry recurrence can exceed that bound (the real q88
+    # bridge reaches about 4e4), so split every carry polynomial into signed
+    # radix-128 digits before placing it in the native witness.
+    carry_digit_count = 3
+    carry_digits = []
+    for carry in bridge.carry_digits:
+        layers = [[0] * degree for _ in range(carry_digit_count)]
+        for coeff_index, value in enumerate(carry):
+            remaining = int(value)
+            for digit_index in range(carry_digit_count):
+                digit = (remaining + bridge.base // 2) % bridge.base - bridge.base // 2
+                layers[digit_index][coeff_index] = digit
+                remaining = (remaining - digit) // bridge.base
+            if remaining:
+                raise ValueError("carry radix capacity exhausted")
+        carry_digits.append(layers)
     vectors = []
     norms = []
     witness_refs = []
@@ -508,12 +525,13 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
         vectors.append(pv)
         norms.append(max(1, sum(value * value for value in values)))
         witness_refs.append(("q", layer, 0))
-    for layer, values in enumerate(bridge.carry_digits):
-        pv = polyvec_t(ring, 1)
-        pv[0] = poly_t(ring, values)
-        vectors.append(pv)
-        norms.append(max(1, sum(value * value for value in values)))
-        witness_refs.append(("c", layer, 0))
+    for layer, digit_layers in enumerate(carry_digits):
+        for digit, values in enumerate(digit_layers):
+            pv = polyvec_t(ring, 1)
+            pv[0] = poly_t(ring, values)
+            vectors.append(pv)
+            norms.append(max(1, sum(value * value for value in values)))
+            witness_refs.append(("c", layer, digit))
     if any(value >= (1 << 64) for value in norms):
         raise ValueError("grouped Pack norm exceeds uint64")
     equation_count = bridge.equation_count()
@@ -549,10 +567,12 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
                 terms.append(poly_t(ring, [-modulus_digit] + [0] * (degree - 1)))
                 witnesses.append(ref_to_index[("q", quotient_layer, 0)])
         if layer:
-            terms.append(poly_t(ring, [1] + [0] * (degree - 1)))
-            witnesses.append(ref_to_index[("c", layer - 1, 0)])
-        terms.append(poly_t(ring, [-bridge.base] + [0] * (degree - 1)))
-        witnesses.append(ref_to_index[("c", layer, 0)])
+            for digit in range(carry_digit_count):
+                terms.append(poly_t(ring, [bridge.base ** digit] + [0] * (degree - 1)))
+                witnesses.append(ref_to_index[("c", layer - 1, digit)])
+        for digit in range(carry_digit_count):
+            terms.append(poly_t(ring, [-(bridge.base ** (digit + 1))] + [0] * (degree - 1)))
+            witnesses.append(ref_to_index[("c", layer, digit)])
         rhs = bridge.target_digits[layer] if layer < len(bridge.target_digits) else [0] * degree
         statement.append_statement(terms, witnesses, poly_t(ring, rhs))
     if int(statement.simple_verify(statement.statement, statement.witness)) != 1:
