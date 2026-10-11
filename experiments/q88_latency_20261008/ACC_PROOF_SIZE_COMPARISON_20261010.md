@@ -327,3 +327,8 @@ thread scopes. A verification phase override of six native threads reduced one
 cached verification sample to **2.625 s** with Pack Verify still passing; proof
 generation remained above 7 s in that run. This is a verification-side
 improvement only and does not meet the 3 s / 1.5 s target.
+
+The prove scope was corrected to preserve the existing disjoint-output
+parallelism; applying the verifier-only scope to proving caused a regression.
+The corrected standalone run measured **5.590 s prove / 2.775 s verify**, with
+both Pack checks and deserialization verification passing.
