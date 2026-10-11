@@ -742,7 +742,8 @@ def build_complete_single_pack_statement(public, prover, link=None, *,
 
 
 def prove_complete_single_pack(public, prover, link, *, cache=None,
-                               check_witness=True):
+                               check_witness=True,
+                               reuse_accumulator_witness=True):
     """Prove, verify, serialize, deserialize, and reverify full q88 Pack.
 
     This is the executable acceptance gate for the complete statement.  It
@@ -753,15 +754,33 @@ def prove_complete_single_pack(public, prover, link, *, cache=None,
     import time
     from labrados import ffi, lib, pack_verify
 
-    statement, _unused_params, _unused_proof = \
-        build_complete_single_pack_statement(
-            public, prover, link, cache=cache,
-            check_witness=check_witness)
-    prove_started = time.perf_counter()
-    error, params, proof = statement.pack_prove()
-    prove_seconds = time.perf_counter() - prove_started
-    if error:
-        raise RuntimeError(f"complete q88 Pack Prove failed: {error}")
+    if cache is None:
+        statement, _unused_params, _unused_proof = \
+            build_complete_single_pack_statement(
+                public, prover, link, cache=None,
+                check_witness=check_witness)
+        prove_started = time.perf_counter()
+        error, params, proof = statement.pack_prove()
+        prove_seconds = time.perf_counter() - prove_started
+        if error:
+            raise RuntimeError(f"complete q88 Pack Prove failed: {error}")
+    else:
+        # Build once into the resident cache.  This creates the static
+        # statement, witness views, and Pack parameters; subsequent calls
+        # rebind only dynamic accumulator/link data and reuse those objects.
+        statement, _unused_params, _unused_proof = \
+            build_complete_single_pack_statement(
+                public, prover, link, cache=cache,
+                check_witness=check_witness)
+        from revac_acc96_full_ring import build_statement_full_ring
+        prove_started = time.perf_counter()
+        statement, params, proof = build_statement_full_ring(
+            public, prover, link, prove=True,
+            check_witness=False, cache=cache,
+            reuse_accumulator_witness=reuse_accumulator_witness)
+        prove_seconds = time.perf_counter() - prove_started
+        if proof is None or params is None:
+            raise RuntimeError("complete q88 resident Pack Prove returned no proof")
     verify_started = time.perf_counter()
     if not pack_verify((params, proof), statement.output_statement(), "38"):
         raise RuntimeError("complete q88 Pack Verify failed")
