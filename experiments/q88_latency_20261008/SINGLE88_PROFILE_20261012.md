@@ -72,3 +72,23 @@ digits, one 88-bit modulus lift, and 128 binary/degree-zero constraints. On
 This is a standalone one-block KAT. The six blocks still need to share their
 witness allocation and be appended to the handle plus q19 statement before
 the profile can be called complete.
+
+## Shared-selector six-block Pack milestone
+
+The six refresh quotient/carry bridges now use one shared native selector
+allocation. The prior implementation duplicated 128 selector vectors per
+block and tied copies with integer equations. The new implementation aliases
+all six blocks to the same 128 degree-4096 binary vectors, so the selector
+binary/degree-zero checks are emitted once while each block retains its exact
+quotient/carry equations.
+
+A fresh run on `autodl-pqa11` passed Clear Verify, Pack Verify, serialization,
+deserialization, and Pack Verify after reload:
+
+`bridge=54.605 s`, `statement=158.216 s`, `Prove=41.790 s`,
+`Verify=33.440 s`, `serialized=169548 B = 165.574 KiB`.
+
+Compared with the duplicated-selector run (`169772 B`, `46.801 s`,
+`35.791 s`), this saves 224 bytes and about 5.0 s proving / 2.4 s verifying.
+This is still a refresh binding milestone: the main accumulator relation's
+refresh product terms have not yet been replaced by these selector bridges.

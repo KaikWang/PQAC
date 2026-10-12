@@ -16,6 +16,7 @@ from typing import Iterable, Sequence
 LANE_MODULI = (1_073_692_673, 536_813_569, 536_690_689)
 CRT_MODULUS = prod(LANE_MODULI)
 PACK_MODULUS = (1 << 38) - 107
+REFRESH_BITS = 128
 
 # Independent single-modulus experiment.  This is deliberately not the
 # production CRT modulus or wire parameter.  It is an 88-bit prime chosen
@@ -1042,6 +1043,133 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
         raise ValueError("extra integer statement clear verification failed")
     if int(statement.simple_verify(statement.statement, statement.witness)) != 1:
         raise ValueError("grouped Pack statement clear verification failed")
+    return statement, ref_to_index
+
+
+def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
+                                      group_size: int = 1):
+    """Put independent exact bridges into one Pack statement.
+
+    This is used for the six refresh blocks.  Each block keeps its own carry
+    chain; selector copies are tied to block zero with integer equations, so
+    the resulting statement cannot satisfy different hidden refresh choices.
+    The implementation intentionally uses singleton vectors for the selector
+    columns, which makes the equality map explicit before a shared-vector
+    compression is attempted.
+    """
+    from lazer import poly_t, polyvec_t, polyring_t
+    from labrados import proof_statement
+    if not bridges:
+        raise ValueError("multi bridge statement needs at least one bridge")
+    degree = bridges[0].degree
+    ring = polyring_t(degree, PACK_MODULUS)
+    if any(bridge.degree != degree or bridge.base != bridges[0].base
+           for bridge in bridges):
+        raise ValueError("multi bridge shape mismatch")
+    vectors, norms, refs = [], [], []
+    aliases = {}
+    carry_layers = []
+    for block, bridge in enumerate(bridges):
+        max_bits = max((max(abs(int(value)).bit_length() for value in carry)
+                        for carry in bridge.carry_digits), default=1)
+        carry_digit_count = max(1, (max_bits + 6) // 7)
+        carry_layers.append([])
+        for layer in range(len(bridge.w_digits[0])):
+            for start in range(0, len(bridge.w_digits), group_size):
+                values = [bridge.w_digits[col][layer]
+                          for col in range(start, min(start + group_size,
+                                                      len(bridge.w_digits)))]
+                pv = polyvec_t(ring, len(values))
+                for index, value in enumerate(values):
+                    pv[index] = poly_t(ring, list(value))
+                ref = (block, "w", layer, start)
+                is_selector = layer == 0 and start < REFRESH_BITS and group_size == 1
+                if is_selector and block:
+                    aliases[ref] = (0, "w", layer, start)
+                    continue
+                vectors.append(pv)
+                norms.append(0 if is_selector else max(
+                    1, sum(value * value for poly in values for value in poly)))
+                refs.append(ref)
+        for layer, values in enumerate(bridge.quotient_digits):
+            pv = polyvec_t(ring, 1)
+            pv[0] = poly_t(ring, list(values))
+            vectors.append(pv)
+            norms.append(max(1, sum(value * value for value in values)))
+            refs.append((block, "q", layer, 0))
+        for layer, carry in enumerate(bridge.carry_digits):
+            layers = [[0] * degree for _ in range(carry_digit_count)]
+            for index, value in enumerate(carry):
+                remaining = int(value)
+                for digit in range(carry_digit_count):
+                    item = (remaining + bridge.base // 2) % bridge.base - bridge.base // 2
+                    layers[digit][index] = item
+                    remaining = (remaining - item) // bridge.base
+                if remaining:
+                    raise ValueError("multi bridge carry capacity exhausted")
+            carry_layers[block].append(layers)
+            for digit, values in enumerate(layers):
+                pv = polyvec_t(ring, 1)
+                pv[0] = poly_t(ring, list(values))
+                vectors.append(pv)
+                norms.append(max(1, sum(value * value for value in values)))
+                refs.append((block, "c", layer, digit))
+    ref_to_index = {}
+    statement = proof_statement(
+        [degree] * len(vectors), [vector.dim for vector in vectors], norms,
+        num_constraints=sum(bridge.equation_count() for bridge in bridges) +
+        REFRESH_BITS,
+        primesize="38", num_int_constraints=0,
+        num_deg0_constraints=REFRESH_BITS, zk=True)
+    for vector, ref in zip(vectors, refs):
+        # append_witness returns the caller-visible index before permutation.
+        ref_to_index[ref] = statement.append_witness(vector)
+    ref_to_index.update({ref: ref_to_index[target]
+                         for ref, target in aliases.items()})
+    zero = poly_t(ring, [0] * degree)
+    one = poly_t(ring, [1] + [0] * (degree - 1))
+    for block, bridge in enumerate(bridges):
+        columns = len(bridge.w_digits)
+        for layer in range(bridge.equation_count()):
+            terms, witnesses = [], []
+            for witness_layer in range(len(bridge.w_digits[0])):
+                public_layer = layer - witness_layer
+                if not 0 <= public_layer < len(bridge.h_digits[0]):
+                    continue
+                for start in range(0, columns, group_size):
+                    end = min(start + group_size, columns)
+                    block_values = [bridge.h_digits[index][public_layer]
+                                    for index in range(start, end)]
+                    pv = polyvec_t(ring, len(block_values))
+                    for index, value in enumerate(block_values):
+                        pv[index] = poly_t(ring, list(value))
+                    terms.append(pv)
+                    witnesses.append(ref_to_index[(block, "w", witness_layer, start)])
+            for q_layer, modulus_digit in enumerate(bridge.q_digits):
+                q_index = layer - q_layer
+                if 0 <= q_index < len(bridge.quotient_digits):
+                    terms.append(poly_t(ring, [-modulus_digit] + [0] * (degree - 1)))
+                    witnesses.append(ref_to_index[(block, "q", q_index, 0)])
+            if layer:
+                for digit in range(len(carry_layers[block][layer - 1])):
+                    terms.append(poly_t(ring, [bridge.base ** digit] + [0] * (degree - 1)))
+                    witnesses.append(ref_to_index[(block, "c", layer - 1, digit)])
+            for digit in range(len(carry_layers[block][layer])):
+                terms.append(poly_t(ring, [-(bridge.base ** (digit + 1))] +
+                                    [0] * (degree - 1)))
+                witnesses.append(ref_to_index[(block, "c", layer, digit)])
+            rhs = bridge.target_digits[layer] if layer < len(bridge.target_digits) else [0] * degree
+            statement.append_statement(terms, witnesses, poly_t(ring, list(rhs)))
+    # Shared selector vectors are binary once; aliases already force every
+    # refresh block to use the same witness allocation.
+    for bit in range(REFRESH_BITS):
+        current = ref_to_index[(0, "w", 0, bit)]
+        statement.append_deg0_statement(current)
+        statement.append_quadratic_statement(
+            [poly_t(ring, [-1] + [0] * (degree - 1))], [current], [1],
+            [current], [current], zero)
+    if int(statement.simple_verify(statement.statement, statement.witness)) != 1:
+        raise ValueError("multi refresh Pack statement clear verification failed")
     return statement, ref_to_index
 
 
