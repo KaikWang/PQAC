@@ -15,6 +15,7 @@ import time
 from q88_bridge_core import (SINGLE88_PRIME, build_grouped_pack_statement,
                              compile_single88_bridge_fast)
 from q88_bridge_relation import build_single88_effective_relation
+from q88_bridge_relation import build_single88_handle_bound_relation
 from q88_single_prime_profile import verify_modulus_certificate
 from revac_acc96_wire import PROVER_BYTES, LinkPayload, ProverPayload, PublicParameters
 
@@ -26,6 +27,8 @@ def main() -> None:
     # 16 is the smallest tested grouping that reduced Pack reducer work while
     # keeping the exact norm gate and both serialized verification checks.
     parser.add_argument("--group-size", type=int, default=16)
+    parser.add_argument("--handle-bound", action="store_true",
+                        help="bind handle bits and product witnesses in Pack")
     args = parser.parse_args()
     verify_modulus_certificate()
     public = PublicParameters.decode(Path(args.public).read_bytes())
@@ -34,13 +37,44 @@ def main() -> None:
     link = LinkPayload.decode(raw[PROVER_BYTES:])
     link.audit_relation(prover.handle_vector)
     started = time.perf_counter()
-    matrix, witness = build_single88_effective_relation(
-        public, prover, modulus=SINGLE88_PRIME)
+    if args.handle_bound:
+        matrix, witness, handle_meta = build_single88_handle_bound_relation(
+            public, prover, modulus=SINGLE88_PRIME)
+    else:
+        matrix, witness = build_single88_effective_relation(
+            public, prover, modulus=SINGLE88_PRIME)
+        handle_meta = None
     bridge = compile_single88_bridge_fast(
         matrix, witness, base=128, witness_digits=9, quotient_digits=16)
     bridge_seconds = time.perf_counter() - started
     statement_started = time.perf_counter()
-    statement, _ = build_grouped_pack_statement(bridge, group_size=args.group_size)
+    extra_witness = []
+    extra_quadratics = []
+    extra_deg0 = []
+    if handle_meta is not None:
+        one = [1] + [0] * (len(witness[0]) - 1)
+        for bit, value in enumerate(handle_meta["handle_bits"]):
+            ref = ("bit", bit)
+            extra_witness.append({"ref": ref,
+                                  "values": [tuple([value] + [0] * (len(one) - 1))],
+                                  "norm": 0})
+            extra_deg0.append(ref)
+            extra_quadratics.append({
+                "linear": [((tuple(-v for v in one)), ref)],
+                "quadratic": [(1, ref, ref)],
+            })
+        for digit, product_index in enumerate(handle_meta["product_refs"]):
+            terms = [(1, ("bit", bit), ("w", 0,
+                                           handle_meta["right_refs"][digit][bit]))
+                     for bit in range(len(handle_meta["handle_bits"]))]
+            extra_quadratics.append({
+                "linear": [((tuple(-v for v in one)), ("w", 0, product_index))],
+                "quadratic": terms,
+            })
+    statement, _ = build_grouped_pack_statement(
+        bridge, group_size=(1 if handle_meta is not None else args.group_size),
+        extra_witness=extra_witness, extra_quadratics=extra_quadratics,
+        extra_deg0=extra_deg0)
     statement_seconds = time.perf_counter() - statement_started
     if int(statement.simple_verify(statement.statement, statement.witness)) != 1:
         raise RuntimeError("single88 profile Clear Verify failed")
@@ -64,6 +98,7 @@ def main() -> None:
     if not pack_verify((params, decoded), statement.output_statement(), "38"):
         raise RuntimeError("single88 profile deserialized Pack Verify failed")
     print(f"single88 modulus={SINGLE88_PRIME}")
+    print(f"handle_binding={'enabled' if handle_meta is not None else 'effective-profile'}")
     print(f"columns={len(matrix)} witness_degree={len(witness[0])}")
     print(f"bridge={bridge_seconds:.3f}s statement={statement_seconds:.3f}s")
     print(f"clear=passed prove={prove_seconds:.3f}s verify={verify_seconds:.3f}s")

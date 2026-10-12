@@ -868,10 +868,11 @@ def append_native_binding_plan(statement, ring, plan,
 
 
 def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
-                                 zk: bool = True):
+                                 zk: bool = True, extra_witness=None,
+                                 extra_quadratics=None, extra_deg0=None):
     """Build one grouped native Pack statement from a verified Bridge."""
     from lazer import poly_t, polyvec_t, polyring_t
-    from labrados import proof_statement
+    from labrados import proof_statement, lib
     if group_size <= 0:
         raise ValueError("group size must be positive")
     degree = bridge.degree
@@ -930,9 +931,25 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
     # production single-prime profile must replace this with an audited
     # witness-bound calculation; it must never infer security from this KAT.
     kat_norms = [max(1, norm) for norm in norms]
+    # Optional witnesses/constraints are used by the isolated full-shape
+    # profile to bind hidden selectors and product witnesses in the same
+    # native statement.  Each extra entry is
+    # ``{"ref": hashable, "values": [poly, ...], "norm": uint64}``.
+    extra_witness = list(extra_witness or ())
+    extra_quadratics = list(extra_quadratics or ())
+    extra_deg0 = list(extra_deg0 or ())
+    for item in extra_witness:
+        values = item["values"]
+        pv = polyvec_t(ring, len(values))
+        for index, values_poly in enumerate(values):
+            pv[index] = poly_t(ring, list(values_poly))
+        vectors.append(pv)
+        norms.append(int(item.get("norm", 1)))
+        witness_refs.append(item["ref"])
     statement = proof_statement(
-        [degree] * len(vectors), [vector.dim for vector in vectors], kat_norms,
-        num_constraints=equation_count, primesize="38", zk=zk)
+        [degree] * len(vectors), [vector.dim for vector in vectors], norms,
+        num_constraints=equation_count + len(extra_quadratics),
+        primesize="38", num_deg0_constraints=len(extra_deg0), zk=zk)
     indices = [statement.append_witness(vector) for vector in vectors]
     ref_to_index = {ref: index for ref, index in zip(witness_refs, indices)}
     zero = poly_t(ring, [0] * degree)
@@ -971,6 +988,26 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
         rhs = (bridge.target_digits[layer]
                if layer < len(bridge.target_digits) else [0] * degree)
         statement.append_statement(terms, witnesses, poly_t(ring, list(rhs)))
+    one = poly_t(ring, [1] + [0] * (degree - 1))
+    zero = poly_t(ring, [0] * degree)
+    for item in extra_deg0:
+        index = ref_to_index[item]
+        error = lib.labrador38_py_append_deg0_logical_vector_constraints(
+            statement.statement, statement.map[index], 1, degree // 256)
+        if error:
+            raise ValueError(f"extra degree-zero constraint failed: {error}")
+        statement.cur_deg0_constraint_num += 1
+    for item in extra_quadratics:
+        linear = [poly_t(ring, list(coeff)) for coeff, _ in item.get("linear", ())]
+        linear_refs = [ref_to_index[ref] for _, ref in item.get("linear", ())]
+        quadratic_coefficients = [int(coeff) for coeff, _, _ in item.get("quadratic", ())]
+        quadratic_left = [ref_to_index[left]
+                          for _, left, _ in item.get("quadratic", ())]
+        quadratic_right = [ref_to_index[right]
+                           for _, _, right in item.get("quadratic", ())]
+        statement.append_quadratic_statement(
+            linear, linear_refs, quadratic_coefficients,
+            quadratic_left, quadratic_right, zero)
     if int(statement.simple_verify(statement.statement, statement.witness)) != 1:
         raise ValueError("grouped Pack statement clear verification failed")
     return statement, ref_to_index

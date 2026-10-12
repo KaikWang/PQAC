@@ -34,3 +34,20 @@ full-shape performance baseline, not the requested security-complete single
 coefficients with auxiliary product witnesses and append their binary,
 quotient/carry, CRT-lift, and q19 same-handle bindings to the same native
 statement.
+
+## Handle-bound milestone
+
+The `--handle-bound` mode now removes the effective hidden-handle shortcut.
+It registers six unscaled handle product witnesses, adds 24 binary
+constraints, and adds six quadratic product bindings in the same statement.
+The refresh selector is still effective in this milestone.
+
+Measured on `autodl-pqa11` with the exact serialized reload gate:
+
+`bridge=13.656 s`, `statement=34.291 s`, `Prove=13.576 s`,
+`Verify=9.651 s`, `serialized=169228 B = 165.262 KiB`.
+
+Clear Verify, Pack Verify, serialization, deserialization, and Pack Verify
+after reload all passed. Because refresh and q19 bindings are not yet in this
+statement, this row is a handle-bound intermediate and not the final secure
+single-prime profile.

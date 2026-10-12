@@ -180,6 +180,86 @@ def build_single88_effective_relation(public: Any, prover: Any,
     return tuple(columns), witness
 
 
+def build_single88_handle_bound_relation(public: Any, prover: Any, *,
+                                         modulus: int) -> tuple[
+                                             tuple[tuple[int, ...], ...],
+                                             tuple[tuple[int, ...], ...],
+                                             dict[str, Any]]:
+    """Replace the hidden handle shortcut with product witnesses.
+
+    For each gadget digit ``d`` this creates
+    ``P_d = sum_b handle[b] * right[b,d]``.  The main accumulator relation
+    uses ``-G^d P_d`` instead of putting the hidden bits into a public
+    coefficient.  The returned metadata is consumed by the native builder to
+    append the six quadratic binding equations and 24 binary equations.
+    Refresh remains effective in this first safe-handle milestone and is
+    deliberately marked in the metadata so callers cannot call it complete.
+    """
+    degree = len(prover.witness_poly(0))
+    if modulus <= 2:
+        raise ValueError("single q88 profile modulus is invalid")
+    canonical = lambda value: int(value) % modulus
+    one = tuple([1] + [0] * (degree - 1))
+    def poly(values):
+        if len(values) != degree:
+            raise ValueError("single q88 handle-bound degree mismatch")
+        return tuple(canonical(value) for value in values)
+    prefix_slots = [0, 1] + list(range(2, 2 + TRUNC_RIGHT))
+    prefix_witness = [tuple(int(v) for v in prover.witness_poly(slot))
+                      for slot in prefix_slots]
+    columns = [one, poly(public.atrap())]
+    scale = TRUNC_BASE * TRUNC_BASE
+    for source in range(TRUNC_RIGHT):
+        coefficient = [(-int(v)) % modulus for v in public.trunc_b[source]]
+        coefficient[0] = (coefficient[0] + scale) % modulus
+        columns.append(tuple(coefficient))
+        scale *= TRUNC_BASE
+    witness = list(prefix_witness)
+    right_refs: list[list[int]] = []
+    for digit in range(GADGET_DIGITS):
+        row_refs = []
+        for bit in range(HANDLE_BITS):
+            row_refs.append(len(witness))
+            columns.append(poly(public.ba(bit, digit)))
+            witness.append(tuple(int(v) for v in prover.witness_poly(
+                TAG_SLOT + 1 + bit * GADGET_DIGITS + digit)))
+        right_refs.append(row_refs)
+    product_refs = []
+    for digit in range(GADGET_DIGITS):
+        values = [0] * degree
+        for bit, selected in enumerate(prover.handle_vector):
+            if selected:
+                right = witness[right_refs[digit][bit]]
+                values = [left + right_value
+                          for left, right_value in zip(values, right)]
+        product_refs.append(len(witness))
+        columns.append(tuple((-GADGET_BASE ** digit) % modulus
+                             if index == 0 else 0
+                             for index in range(degree)))
+        witness.append(tuple(values))
+    refresh_refs = []
+    for block in range(REFRESH_BLOCKS):
+        composed = list(public.refresh(0, block))
+        for bit, selected in enumerate(prover.refresh_r_bits):
+            if selected:
+                row = public.refresh(bit + 1, block)
+                composed = [left + right for left, right in zip(composed, row)]
+        columns.append(poly(composed))
+        refresh_refs.append(len(witness))
+        witness.append(tuple(int(v) for v in prover.witness_poly(
+            REFRESH_Z_FIRST_SLOT + block)))
+    if len(columns) != len(witness):
+        raise ValueError("single q88 handle-bound inventory mismatch")
+    metadata = {
+        "right_refs": tuple(tuple(row) for row in right_refs),
+        "product_refs": tuple(product_refs),
+        "handle_bits": tuple(int(v) for v in prover.handle_vector),
+        "refresh_refs": tuple(refresh_refs),
+        "complete": False,
+    }
+    return tuple(columns), tuple(witness), metadata
+
+
 def verify_selected_coefficients(relation: EffectiveLaneRelation,
                                  outputs: tuple[int, ...] = (0, 1, 255,
                                                              256, 4095)) -> None:
