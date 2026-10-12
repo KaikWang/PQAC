@@ -86,6 +86,9 @@ def main():
     if not pack_verify((params, decoded), statement.output_statement(), "38"):
         raise RuntimeError("six-block refresh reload Verify failed")
     print(f"refresh_blocks={REFRESH_BLOCKS} selectors={REFRESH_BITS} modulus={SINGLE88_PRIME}")
+    print(f"native_witness_vectors={statement.num_witness_vectors} "
+          f"constraints={statement.num_constraints} "
+          f"deg0_constraints={statement.num_deg0_constraints}")
     print(f"bridge={bridge_seconds:.3f}s statement={statement_seconds:.3f}s")
     print(f"clear=passed prove={prove_seconds:.3f}s verify={verify_seconds:.3f}s")
     print(f"serialized={int(size)} bytes ({int(size)/1024:.3f} KiB) reload=passed")
