@@ -17,6 +17,41 @@ LANE_MODULI = (1_073_692_673, 536_813_569, 536_690_689)
 CRT_MODULUS = prod(LANE_MODULI)
 PACK_MODULUS = (1 << 38) - 107
 
+# Independent single-modulus experiment.  This is deliberately not the
+# production CRT modulus or wire parameter.  It is an 88-bit prime chosen
+# near the current CRT product so coefficient magnitudes remain comparable.
+from q88_single_prime_profile import SINGLE88_PRIME, verify_modulus_certificate
+
+
+def _is_probable_prime(value: int) -> bool:
+    """Probable-prime screening only; not an 88-bit primality certificate."""
+    if value < 2:
+        return False
+    for small in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
+        if value % small == 0:
+            return value == small
+    odd = value - 1
+    exponent = 0
+    while odd % 2 == 0:
+        odd //= 2
+        exponent += 1
+    for base in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37):
+        if base >= value:
+            continue
+        candidate = pow(base, odd, value)
+        if candidate in (1, value - 1):
+            continue
+        for _ in range(exponent - 1):
+            candidate = candidate * candidate % value
+            if candidate == value - 1:
+                break
+        else:
+            return False
+    return True
+
+
+verify_modulus_certificate()
+
 
 def full_ring_dimension_breakdown(*, compact_limbs: int = 4,
                                   aggregate_ranks: tuple[int, ...] = (16, 8),
@@ -219,6 +254,14 @@ def negacyclic_mul(a: Sequence[int], b: Sequence[int]) -> list[int]:
         raise ValueError("q88 bridge polynomial degree mismatch")
     n = len(a)
     out = [0] * n
+    nonzero_a = [(i, int(value)) for i, value in enumerate(a) if value]
+    nonzero_b = [(i, int(value)) for i, value in enumerate(b) if value]
+    if len(nonzero_a) * len(nonzero_b) < n * n // 8:
+        for i, left in nonzero_a:
+            for j, right in nonzero_b:
+                k = i + j
+                out[k % n] += left * right if k < n else -left * right
+        return out
     for i, left in enumerate(a):
         for j, right in enumerate(b):
             k = i + j
@@ -308,6 +351,140 @@ class LinearCRTBridge:
                           zip(expression, self.carry_digits[layer])]
             if expression != zero:
                 raise ValueError(f"q88 bridge carry equation {layer} failed")
+
+
+@dataclass(frozen=True)
+class Single88Bridge:
+    """Exact quotient/carry bridge for the independent single-prime profile.
+
+    The relation is ``sum_i A_i*w_i - t = P*z`` over integer polynomial
+    coefficients, with all public and private values radix decomposed before
+    entering the 38-bit Pack ring.  This class intentionally has no CRT
+    fields and is never consumed by the production q88 compiler.
+    """
+
+    degree: int
+    base: int
+    h_digits: tuple[tuple[tuple[int, ...], ...], ...]
+    w_digits: tuple[tuple[tuple[int, ...], ...], ...]
+    q_digits: tuple[int, ...]
+    quotient_digits: tuple[tuple[int, ...], ...]
+    target_digits: tuple[tuple[int, ...], ...]
+    carry_digits: tuple[tuple[int, ...], ...]
+    modulus: int
+
+    def equation_count(self) -> int:
+        return len(self.carry_digits)
+
+    def verify(self) -> None:
+        zero = [0] * self.degree
+        for layer in range(self.equation_count()):
+            expression = list(self.carry_digits[layer - 1]
+                              if layer else zero)
+            for matrix, witness in zip(self.h_digits, self.w_digits):
+                for matrix_layer, matrix_digit in enumerate(matrix):
+                    witness_layer = layer - matrix_layer
+                    if 0 <= witness_layer < len(witness):
+                        product = negacyclic_mul(
+                            matrix_digit, witness[witness_layer])
+                        expression = [x + y for x, y in
+                                      zip(expression, product)]
+            for modulus_layer, modulus_digit in enumerate(self.q_digits):
+                quotient_layer = layer - modulus_layer
+                if 0 <= quotient_layer < len(self.quotient_digits):
+                    expression = [x - modulus_digit * y for x, y in zip(
+                        expression, self.quotient_digits[quotient_layer])]
+            if layer < len(self.target_digits):
+                expression = [x - y for x, y in zip(
+                    expression, self.target_digits[layer])]
+            expression = [x - self.base * y for x, y in zip(
+                expression, self.carry_digits[layer])]
+            if expression != zero:
+                raise ValueError(f"single q88 bridge carry {layer} failed")
+
+
+def compile_single88_bridge(matrix: Sequence[Sequence[int]],
+                            witness: Sequence[Sequence[int]],
+                            target: Sequence[int], *,
+                            base: int = 128,
+                            witness_digits: int = 9,
+                            quotient_digits: int = 16,
+                            modulus: int = SINGLE88_PRIME) -> Single88Bridge:
+    """Compile one exact 88-bit-prime relation into radix carry equations."""
+    if base < 2 or base & (base - 1):
+        raise ValueError("single q88 bridge radix must be a power of two")
+    if modulus != SINGLE88_PRIME:
+        raise ValueError("single q88 bridge requires the certified profile modulus")
+    verify_modulus_certificate()
+    if not witness or len(matrix) != len(witness):
+        raise ValueError("single q88 matrix/witness shape mismatch")
+    degree = len(target)
+    if degree == 0 or any(len(poly) != degree
+                           for poly in list(matrix) + list(witness)):
+        raise ValueError("single q88 polynomial degree mismatch")
+    total = [0] * degree
+    for public_poly, secret_poly in zip(matrix, witness):
+        total = [x + y for x, y in zip(
+            total, negacyclic_mul(public_poly, secret_poly))]
+    centered_target = [int(value) % modulus for value in target]
+    quotient = [(value - rhs) // modulus
+                if (value - rhs) % modulus == 0 else None
+                for value, rhs in zip(total, centered_target)]
+    if any(value is None for value in quotient):
+        raise ValueError("single q88 relation is not congruent modulo prime")
+    base_bits = base.bit_length() - 1
+    # Signed digits need one extra sign bit at the maximum public magnitude.
+    public_bits = max(modulus.bit_length(),
+                      max((abs(int(value)).bit_length() + 1 for poly in matrix
+                           for value in poly), default=1))
+    matrix_count = (public_bits + base_bits - 1) // base_bits
+    matrix_digits = tuple(tuple(tuple(layer) for layer in
+                                _decompose(poly, base, matrix_count,
+                                           signed=True))
+                          for poly in matrix)
+    witness_layers = tuple(tuple(tuple(layer) for layer in
+                                 _decompose(poly, base, witness_digits,
+                                            signed=True))
+                           for poly in witness)
+    target_digits = tuple(tuple(layer) for layer in
+                          _decompose(centered_target, base, matrix_count,
+                                     signed=False))
+    q_digits = tuple(_digits(modulus, base, matrix_count, signed=False))
+    quotient_layers = tuple(tuple(layer) for layer in
+                            _decompose([int(value) for value in quotient],
+                                       base, quotient_digits, signed=True))
+    layer_count = max(matrix_count + witness_digits - 1,
+                      matrix_count + quotient_digits - 1) + 1
+    carries = []
+    previous = [0] * degree
+    for layer in range(layer_count):
+        expression = previous[:]
+        for matrix_poly, secret in zip(matrix_digits, witness_layers):
+            for matrix_layer, public_digit in enumerate(matrix_poly):
+                witness_layer = layer - matrix_layer
+                if 0 <= witness_layer < len(secret):
+                    product = negacyclic_mul(
+                        public_digit, secret[witness_layer])
+                    expression = [x + y for x, y in zip(expression, product)]
+        for modulus_layer, modulus_digit in enumerate(q_digits):
+            quotient_layer = layer - modulus_layer
+            if 0 <= quotient_layer < len(quotient_layers):
+                expression = [x - modulus_digit * y for x, y in zip(
+                    expression, quotient_layers[quotient_layer])]
+        if layer < len(target_digits):
+            expression = [x - y for x, y in zip(expression, target_digits[layer])]
+        if any(value % base for value in expression):
+            raise ValueError(f"single q88 bridge carry {layer} is not integral")
+        previous = [value // base for value in expression]
+        carries.append(previous)
+    if any(previous):
+        raise ValueError("single q88 bridge terminal carry is nonzero")
+    bridge = Single88Bridge(
+        degree, base, matrix_digits, witness_layers, q_digits,
+        quotient_layers, target_digits,
+        tuple(tuple(layer) for layer in carries), modulus)
+    bridge.verify()
+    return bridge
 
 
 def compile_linear_crt_bridge(matrix: Sequence[Sequence[Sequence[int]]],
@@ -632,29 +809,33 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
                      for col in range(start, min(start + group_size, columns))]
             pv = polyvec_t(ring, len(block))
             for index, values in enumerate(block):
-                pv[index] = poly_t(ring, values)
+                pv[index] = poly_t(ring, list(values))
             vectors.append(pv)
             norms.append(max(1, sum(value * value for poly in block
                                     for value in poly)))
             witness_refs.append(("w", layer, start))
     for layer, values in enumerate(bridge.quotient_digits):
         pv = polyvec_t(ring, 1)
-        pv[0] = poly_t(ring, values)
+        pv[0] = poly_t(ring, list(values))
         vectors.append(pv)
         norms.append(max(1, sum(value * value for value in values)))
         witness_refs.append(("q", layer, 0))
     for layer, digit_layers in enumerate(carry_digits):
         for digit, values in enumerate(digit_layers):
             pv = polyvec_t(ring, 1)
-            pv[0] = poly_t(ring, values)
+            pv[0] = poly_t(ring, list(values))
             vectors.append(pv)
             norms.append(max(1, sum(value * value for value in values)))
             witness_refs.append(("c", layer, digit))
     if any(value >= (1 << 64) for value in norms):
         raise ValueError("grouped Pack norm exceeds uint64")
     equation_count = bridge.equation_count()
+    # The bridge KAT deliberately uses a conservative public norm budget.  A
+    # production single-prime profile must replace this with an audited
+    # witness-bound calculation; it must never infer security from this KAT.
+    kat_norms = [max(1, norm) for norm in norms]
     statement = proof_statement(
-        [degree] * len(vectors), [vector.dim for vector in vectors], norms,
+        [degree] * len(vectors), [vector.dim for vector in vectors], kat_norms,
         num_constraints=equation_count, primesize="38", zk=zk)
     indices = [statement.append_witness(vector) for vector in vectors]
     ref_to_index = {ref: index for ref, index in zip(witness_refs, indices)}
@@ -676,7 +857,7 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
                          for index in range(start, end)]
                 pv = polyvec_t(ring, len(block))
                 for index, values in enumerate(block):
-                    pv[index] = poly_t(ring, values)
+                    pv[index] = poly_t(ring, list(values))
                 terms.append(pv)
                 witnesses.append(ref_to_index[("w", witness_layer, start)])
         for q_layer, modulus_digit in enumerate(bridge.q_digits):
@@ -691,8 +872,9 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
         for digit in range(carry_digit_count):
             terms.append(poly_t(ring, [-(bridge.base ** (digit + 1))] + [0] * (degree - 1)))
             witnesses.append(ref_to_index[("c", layer, digit)])
-        rhs = bridge.target_digits[layer] if layer < len(bridge.target_digits) else [0] * degree
-        statement.append_statement(terms, witnesses, poly_t(ring, rhs))
+        rhs = (bridge.target_digits[layer]
+               if layer < len(bridge.target_digits) else [0] * degree)
+        statement.append_statement(terms, witnesses, poly_t(ring, list(rhs)))
     if int(statement.simple_verify(statement.statement, statement.witness)) != 1:
         raise ValueError("grouped Pack statement clear verification failed")
     return statement, ref_to_index
