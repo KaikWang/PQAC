@@ -58,3 +58,17 @@ checks for the small handle representation. A fresh run passed all gates with:
 
 Refresh selector binding remains the next missing security component, so this
 is still an intermediate rather than the final secure single-prime profile.
+
+## Refresh quotient/carry KAT
+
+`q88_refresh_binding_kat.py` now proves one complete refresh block using the
+production structure: 128 selector witnesses, 13 radix-128 centered refresh
+digits, one 88-bit modulus lift, and 128 binary/degree-zero constraints. On
+`autodl-pqa11` it passed all native and serialization gates with:
+
+`bridge=8.824 s`, `statement=26.293 s`, `Prove=9.462 s`,
+`Verify=8.153 s`, `serialized=169772 B = 165.793 KiB`.
+
+This is a standalone one-block KAT. The six blocks still need to share their
+witness allocation and be appended to the handle plus q19 statement before
+the profile can be called complete.
