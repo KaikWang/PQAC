@@ -48,6 +48,13 @@ Measured on `autodl-pqa11` with the exact serialized reload gate:
 `Verify=9.651 s`, `serialized=169228 B = 165.262 KiB`.
 
 Clear Verify, Pack Verify, serialization, deserialization, and Pack Verify
-after reload all passed. Because refresh and q19 bindings are not yet in this
-statement, this row is a handle-bound intermediate and not the final secure
-single-prime profile.
+after reload all passed. The q19 part is now also available in `--handle-bound`:
+it adds degree-256 randomness and lift witnesses, four exact q19 linear rows,
+24 degree-4096 to degree-256 handle integer links, and binary/degree-zero
+checks for the small handle representation. A fresh run passed all gates with:
+
+`bridge=14.011 s`, `statement=39.761 s`, `Prove=12.246 s`,
+`Verify=9.427 s`, `serialized=169196 B = 165.230 KiB`.
+
+Refresh selector binding remains the next missing security component, so this
+is still an intermediate rather than the final secure single-prime profile.

@@ -17,7 +17,9 @@ from q88_bridge_core import (SINGLE88_PRIME, build_grouped_pack_statement,
 from q88_bridge_relation import build_single88_effective_relation
 from q88_bridge_relation import build_single88_handle_bound_relation
 from q88_single_prime_profile import verify_modulus_certificate
-from revac_acc96_wire import PROVER_BYTES, LinkPayload, ProverPayload, PublicParameters
+from revac_acc96_wire import (PROVER_BYTES, LinkPayload, ProverPayload,
+                              PublicParameters, Q19, Q19_D, Q19_N,
+                              LINK_DECOMP_BASE, LINK_DECOMP_LIMBS)
 
 
 def main() -> None:
@@ -51,6 +53,8 @@ def main() -> None:
     extra_witness = []
     extra_quadratics = []
     extra_deg0 = []
+    extra_linear = []
+    extra_integers = []
     if handle_meta is not None:
         one = [1] + [0] * (len(witness[0]) - 1)
         for bit, value in enumerate(handle_meta["handle_bits"]):
@@ -71,10 +75,86 @@ def main() -> None:
                 "linear": [((tuple(-v for v in one)), ("w", 0, product_index))],
                 "quadratic": terms,
             })
+        # q19 link rows are degree-256 linear relations.  The q19 handle is a
+        # separate scalar representation and is tied coefficient 0 to the
+        # degree-4096 handle witness with integer constraints below.
+        q19_one = tuple([1] + [0] * (Q19_N - 1))
+        q19_bits = []
+        for bit, value in enumerate(handle_meta["handle_bits"]):
+            ref = ("q19bit", bit)
+            q19_bits.append(ref)
+            extra_witness.append({
+                "ref": ref, "degree": Q19_N,
+                "values": [tuple([value] + [0] * (Q19_N - 1))],
+                "norm": 0,
+            })
+            extra_deg0.append(ref)
+            coefficients = [0] * len(witness[0])
+            coefficients[0] = 1
+            full_ref = ("bit", bit)
+            small_coefficients = [0] * Q19_N
+            small_coefficients[0] = -1
+            extra_integers.append({
+                "coefficients": coefficients + small_coefficients,
+                "refs": [full_ref, ref], "target": 0,
+            })
+        link_a, link_d = link.public_matrices()
+        def q19_center(value):
+            value = int(value) % Q19
+            return value - Q19 if value > Q19 // 2 else value
+        def shift(poly, amount):
+            output = [0] * Q19_N
+            for index, raw_value in enumerate(poly):
+                value = q19_center(raw_value)
+                destination = index + amount
+                if destination < Q19_N:
+                    output[destination] += value
+                else:
+                    output[destination - Q19_N] -= value
+            return tuple(q19_center(value) for value in output)
+        for part in range(2):
+            if part == 0:
+                for row in range(Q19_D):
+                    ref = ("q19r0", row)
+                    extra_witness.append({
+                        "ref": ref, "degree": Q19_N,
+                        "values": [link.randomness[0][row]], "norm": 0,
+                    })
+            else:
+                for col in range(Q19_D):
+                    ref = ("q19r1", col)
+                    extra_witness.append({
+                        "ref": ref, "degree": Q19_N,
+                        "values": [link.randomness[1][col]], "norm": 0,
+                    })
+        for row in range(Q19_D):
+            for limb in range(LINK_DECOMP_LIMBS):
+                ref = ("q19lift", row, limb)
+                extra_witness.append({
+                    "ref": ref, "degree": Q19_N,
+                    "values": [link.lift_limbs[row][limb]],
+                    "norm": Q19_N * (LINK_DECOMP_BASE // 2) ** 2,
+                })
+            linear = []
+            linear.append((q19_one, ("q19r0", row)))
+            for col in range(Q19_D):
+                linear.append((tuple(q19_center(v) for v in link_a[row][col]),
+                               ("q19r1", col)))
+            for bit, ref in enumerate(q19_bits):
+                linear.append((shift(link_d[row][0], bit), ref))
+            for limb in range(LINK_DECOMP_LIMBS):
+                scalar = Q19 * (LINK_DECOMP_BASE ** limb)
+                linear.append((tuple((scalar if i == 0 else 0)
+                                     for i in range(Q19_N)),
+                               ("q19lift", row, limb)))
+            target = tuple(q19_center(v) for v in link.commitment[row])
+            extra_linear.append({"degree": Q19_N, "linear": linear,
+                                 "target": target})
     statement, _ = build_grouped_pack_statement(
         bridge, group_size=(1 if handle_meta is not None else args.group_size),
         extra_witness=extra_witness, extra_quadratics=extra_quadratics,
-        extra_deg0=extra_deg0)
+        extra_deg0=extra_deg0, extra_linear=extra_linear,
+        extra_integers=extra_integers)
     statement_seconds = time.perf_counter() - statement_started
     if int(statement.simple_verify(statement.statement, statement.witness)) != 1:
         raise RuntimeError("single88 profile Clear Verify failed")

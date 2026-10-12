@@ -869,7 +869,8 @@ def append_native_binding_plan(statement, ring, plan,
 
 def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
                                  zk: bool = True, extra_witness=None,
-                                 extra_quadratics=None, extra_deg0=None):
+                                 extra_quadratics=None, extra_deg0=None,
+                                 extra_linear=None, extra_integers=None):
     """Build one grouped native Pack statement from a verified Bridge."""
     from lazer import poly_t, polyvec_t, polyring_t
     from labrados import proof_statement, lib
@@ -938,18 +939,31 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
     extra_witness = list(extra_witness or ())
     extra_quadratics = list(extra_quadratics or ())
     extra_deg0 = list(extra_deg0 or ())
+    extra_linear = list(extra_linear or ())
+    extra_integers = list(extra_integers or ())
+    extra_degree_by_ref = {item["ref"]: int(item.get("degree", degree))
+                           for item in extra_witness}
+    vector_degrees = [degree] * len(vectors)
     for item in extra_witness:
         values = item["values"]
-        pv = polyvec_t(ring, len(values))
+        item_degree = int(item.get("degree", degree))
+        item_ring = ring if item_degree == degree else polyring_t(
+            item_degree, PACK_MODULUS)
+        pv = polyvec_t(item_ring, len(values))
         for index, values_poly in enumerate(values):
-            pv[index] = poly_t(ring, list(values_poly))
+            if isinstance(values_poly, int):
+                raise TypeError(f"extra witness {item['ref']!r} has scalar item")
+            pv[index] = poly_t(item_ring, list(values_poly))
         vectors.append(pv)
+        vector_degrees.append(item_degree)
         norms.append(int(item.get("norm", 1)))
         witness_refs.append(item["ref"])
     statement = proof_statement(
-        [degree] * len(vectors), [vector.dim for vector in vectors], norms,
-        num_constraints=equation_count + len(extra_quadratics),
-        primesize="38", num_deg0_constraints=len(extra_deg0), zk=zk)
+        vector_degrees, [vector.dim for vector in vectors], norms,
+        num_constraints=(equation_count + len(extra_quadratics) +
+                         len(extra_linear)),
+        primesize="38", num_int_constraints=len(extra_integers),
+        num_deg0_constraints=len(extra_deg0), zk=zk)
     indices = [statement.append_witness(vector) for vector in vectors]
     ref_to_index = {ref: index for ref, index in zip(witness_refs, indices)}
     zero = poly_t(ring, [0] * degree)
@@ -992,8 +1006,9 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
     zero = poly_t(ring, [0] * degree)
     for item in extra_deg0:
         index = ref_to_index[item]
+        item_degree = extra_degree_by_ref.get(item, degree)
         error = lib.labrador38_py_append_deg0_logical_vector_constraints(
-            statement.statement, statement.map[index], 1, degree // 256)
+            statement.statement, statement.map[index], 1, item_degree // 256)
         if error:
             raise ValueError(f"extra degree-zero constraint failed: {error}")
         statement.cur_deg0_constraint_num += 1
@@ -1008,6 +1023,23 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
         statement.append_quadratic_statement(
             linear, linear_refs, quadratic_coefficients,
             quadratic_left, quadratic_right, zero)
+    for item in extra_linear:
+        item_degree = int(item.get("degree", degree))
+        item_ring = ring if item_degree == degree else polyring_t(
+            item_degree, PACK_MODULUS)
+        linear = [poly_t(item_ring, list(coeff))
+                  for coeff, _ in item["linear"]]
+        refs = [ref_to_index[ref] for _, ref in item["linear"]]
+        statement.append_statement(
+            linear, refs, poly_t(item_ring, list(item["target"])))
+    for item in extra_integers:
+        statement.append_integer_statement(item["coefficients"],
+                                           [ref_to_index[ref]
+                                            for ref in item["refs"]],
+                                           int(item.get("target", 0)))
+    if extra_integers and not int(statement.simple_verify(statement.statement,
+                                                          statement.witness)):
+        raise ValueError("extra integer statement clear verification failed")
     if int(statement.simple_verify(statement.statement, statement.witness)) != 1:
         raise ValueError("grouped Pack statement clear verification failed")
     return statement, ref_to_index
