@@ -118,6 +118,68 @@ def build_effective_lane_relation(public: Any, prover: Any) -> EffectiveLaneRela
                                  tuple(witness_slots))
 
 
+def build_single88_effective_relation(public: Any, prover: Any,
+                                      *, modulus: int) -> tuple[
+                                          tuple[tuple[int, ...], ...],
+                                          tuple[tuple[int, ...], ...]]:
+    """Build the full 174-column, single-prime *profile* relation.
+
+    This deliberately mirrors the q88 wire witness layout (2 base columns,
+    22 truncation columns, 144 handle columns and 6 refresh columns), while
+    sampling/centering every public coefficient in the independent modulus.
+    The caller must derive a new target from this witness before proving.  It
+    is therefore a performance and statement-shape experiment, not a claim
+    that an existing CRT accumulator remains a member after changing rings.
+    """
+    degree = len(prover.witness_poly(0))
+    if modulus <= 2:
+        raise ValueError("single q88 profile modulus is invalid")
+    def center(value: int) -> int:
+        value = int(value) % modulus
+        return value - modulus if value > modulus // 2 else value
+    def vector(values) -> tuple[int, ...]:
+        if len(values) != degree:
+            raise ValueError("single q88 profile degree mismatch")
+        # The fast bridge consumes unsigned public radix digits.  Signed
+        # centering is performed by the ring relation, so keep coefficients
+        # canonical here.
+        return tuple(int(value) % modulus for value in values)
+    witness_slots = [0, 1] + list(range(2, 2 + TRUNC_RIGHT))
+    witness_slots += [TAG_SLOT + 1 + bit * GADGET_DIGITS + digit
+                      for bit in range(HANDLE_BITS)
+                      for digit in range(GADGET_DIGITS)]
+    witness_slots += [REFRESH_Z_FIRST_SLOT + block
+                      for block in range(REFRESH_BLOCKS)]
+    witness = tuple(tuple(int(value) for value in prover.witness_poly(slot))
+                    for slot in witness_slots)
+    columns: list[tuple[int, ...]] = [
+        tuple([1] + [0] * (degree - 1)), vector(public.atrap())]
+    scale = TRUNC_BASE * TRUNC_BASE
+    for source in range(TRUNC_RIGHT):
+        coefficient = [-center(value) for value in public.trunc_b[source]]
+        coefficient[0] = (coefficient[0] + scale) % modulus
+        columns.append(tuple(int(value) % modulus for value in coefficient))
+        scale *= TRUNC_BASE
+    for bit in range(HANDLE_BITS):
+        scale = 1
+        for digit in range(GADGET_DIGITS):
+            coefficient = list(vector(public.ba(bit, digit)))
+            if prover.handle_vector[bit]:
+                coefficient[0] = (coefficient[0] - scale) % modulus
+            columns.append(tuple(coefficient))
+            scale *= GADGET_BASE
+    for block in range(REFRESH_BLOCKS):
+        composed = list(public.refresh(0, block))
+        for bit, selected in enumerate(prover.refresh_r_bits):
+            if selected:
+                row = public.refresh(bit + 1, block)
+                composed = [left + right for left, right in zip(composed, row)]
+        columns.append(vector(composed))
+    if len(columns) != len(witness):
+        raise ValueError("single q88 profile witness/column inventory mismatch")
+    return tuple(columns), witness
+
+
 def verify_selected_coefficients(relation: EffectiveLaneRelation,
                                  outputs: tuple[int, ...] = (0, 1, 255,
                                                              256, 4095)) -> None:

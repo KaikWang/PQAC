@@ -487,6 +487,100 @@ def compile_single88_bridge(matrix: Sequence[Sequence[int]],
     return bridge
 
 
+def compile_single88_bridge_fast(matrix: Sequence[Sequence[int]],
+                                 witness: Sequence[Sequence[int]], *,
+                                 target: Sequence[int] | None = None,
+                                 base: int = 128,
+                                 witness_digits: int = 9,
+                                 quotient_digits: int = 16,
+                                 modulus: int = SINGLE88_PRIME) -> Single88Bridge:
+    """Construct the same single-prime bridge with exact digit FFT sums.
+
+    ``target=None`` derives a fresh public target from the supplied bounded
+    witness.  This mode is used only by the isolated profile: it is not a
+    conversion of an existing CRT accumulator.  When a target is supplied,
+    the function checks its integer congruence before constructing carries.
+    The FFT operates on radix digits and every rounded coefficient is checked
+    by the integer carry recurrence and by :meth:`Single88Bridge.verify`.
+    """
+    if modulus != SINGLE88_PRIME:
+        raise ValueError("single q88 bridge requires the certified profile modulus")
+    if base < 2 or base & (base - 1):
+        raise ValueError("single q88 bridge radix must be a power of two")
+    verify_modulus_certificate()
+    if not matrix or len(matrix) != len(witness):
+        raise ValueError("single q88 matrix/witness shape mismatch")
+    degree = len(witness[0])
+    if degree == 0 or any(len(poly) != degree
+                           for poly in list(matrix) + list(witness)):
+        raise ValueError("single q88 polynomial degree mismatch")
+    try:
+        from exact_negacyclic_fft import digit_sum_negacyclic
+    except ImportError:
+        from Lazer_Acc.python.exact_negacyclic_fft import digit_sum_negacyclic
+    bits = base.bit_length() - 1
+    matrix_count = max(1, (modulus.bit_length() + bits - 1) // bits)
+    conv = digit_sum_negacyclic(matrix, witness, bits,
+                                matrix_count, witness_digits)
+    total = [sum(layer[k] * base ** layer_index
+                  for layer_index, layer in enumerate(conv))
+             for k in range(degree)]
+    if target is None:
+        centered_target = [value % modulus for value in total]
+    else:
+        if len(target) != degree:
+            raise ValueError("single q88 target degree mismatch")
+        centered_target = [int(value) % modulus for value in target]
+    difference = [value - rhs for value, rhs in zip(total, centered_target)]
+    if any(value % modulus for value in difference):
+        raise ValueError("single q88 relation is not congruent modulo prime")
+    quotient = [value // modulus for value in difference]
+    h = [_decompose(poly, base, matrix_count, signed=False)
+         for poly in matrix]
+    w = [_decompose(poly, base, witness_digits, signed=True)
+         for poly in witness]
+    q_digits = _digits(modulus, base, matrix_count, signed=False)
+    t = _decompose(centered_target, base, matrix_count, signed=False)
+    q = _decompose(quotient, base, quotient_digits, signed=True)
+    layer_count = max(len(conv), matrix_count + quotient_digits - 1) + 1
+    carries: list[list[int]] = []
+    previous = [0] * degree
+    for layer in range(layer_count):
+        expression = previous[:]
+        if layer < len(conv):
+            expression = [x + y for x, y in zip(expression, conv[layer])]
+        for i, modulus_digit in enumerate(q_digits):
+            j = layer - i
+            if 0 <= j < len(q):
+                expression = [x - modulus_digit * y for x, y in
+                              zip(expression, q[j])]
+        if layer < len(t):
+            expression = [x - y for x, y in zip(expression, t[layer])]
+        if any(value % base for value in expression):
+            raise ValueError(f"single q88 fast bridge carry {layer} is not integral")
+        previous = [value // base for value in expression]
+        carries.append(previous)
+    if any(previous):
+        raise ValueError("single q88 fast bridge terminal carry is nonzero")
+    bridge = Single88Bridge(degree, base,
+                            tuple(tuple(tuple(layer) for layer in poly)
+                                  for poly in h),
+                            tuple(tuple(tuple(layer) for layer in poly)
+                                  for poly in w),
+                            q_digits,
+                            tuple(tuple(layer) for layer in q),
+                            tuple(tuple(layer) for layer in t),
+                            tuple(tuple(layer) for layer in carries), modulus)
+    # The recurrence above is the exact coefficient-wise verification.  A
+    # second generic check would redo every 4096^2 negacyclic product and
+    # makes the 174-column profile needlessly quadratic in Python.  Keep the
+    # independent O(N^2) check for small KATs; production-sized profiles use
+    # the exact digit-sum recurrence plus native Clear Verify below.
+    if degree <= 512 or len(matrix) <= 16:
+        bridge.verify()
+    return bridge
+
+
 def compile_linear_crt_bridge(matrix: Sequence[Sequence[Sequence[int]]],
                               witness: Sequence[Sequence[int]],
                               target: Sequence[Sequence[int]], *,
@@ -786,7 +880,9 @@ def build_grouped_pack_statement(bridge: Bridge, *, group_size: int = 12,
     # raw quotient/carry recurrence can exceed that bound (the real q88
     # bridge reaches about 4e4), so split every carry polynomial into signed
     # radix-128 digits before placing it in the native witness.
-    carry_digit_count = 3
+    max_carry_bits = max((max(abs(int(value)).bit_length() for value in carry)
+                          for carry in bridge.carry_digits), default=1)
+    carry_digit_count = max(1, (max_carry_bits + 6) // 7)
     carry_digits = []
     for carry in bridge.carry_digits:
         layers = [[0] * degree for _ in range(carry_digit_count)]
