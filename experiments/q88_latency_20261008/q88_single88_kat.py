@@ -9,6 +9,7 @@ and proof serialization/deserialization before any full-profile integration.
 from __future__ import annotations
 
 import time
+import random
 
 from q88_bridge_core import (SINGLE88_PRIME, build_grouped_pack_statement,
                              compile_single88_bridge)
@@ -16,12 +17,18 @@ from q88_bridge_core import (SINGLE88_PRIME, build_grouped_pack_statement,
 
 def main() -> None:
     degree = 4096
+    # A deterministic dense-enough relation avoids a degenerate zero-norm
+    # Pack profile while keeping this KAT quick.  The real profile uses the
+    # audited q88 witness distribution, not these toy coefficients.
+    random.seed(9)
     matrix = [[0] * degree]
     witness = [[0] * degree]
-    matrix[0][0], matrix[0][1] = 3, 1
-    witness[0][0], witness[0][1] = 5, -2
-    target = [0] * degree
-    target[0], target[1], target[2] = 15, -1, -2
+    for index in random.sample(range(degree), 128):
+        matrix[0][index] = random.randint(-20, 20)
+    for index in random.sample(range(degree), 128):
+        witness[0][index] = random.randint(-2, 2)
+    from q88_bridge_core import negacyclic_mul
+    target = negacyclic_mul(matrix[0], witness[0])
     target = [value % SINGLE88_PRIME for value in target]
 
     started = time.perf_counter()
