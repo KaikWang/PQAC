@@ -181,7 +181,7 @@ def build_single88_effective_relation(public: Any, prover: Any,
 
 
 def build_single88_handle_bound_relation(public: Any, prover: Any, *,
-                                         modulus: int) -> tuple[
+                                         modulus: int, include_refresh: bool = True) -> tuple[
                                              tuple[tuple[int, ...], ...],
                                              tuple[tuple[int, ...], ...],
                                              dict[str, Any]]:
@@ -238,7 +238,7 @@ def build_single88_handle_bound_relation(public: Any, prover: Any, *,
                              for index in range(degree)))
         witness.append(tuple(values))
     refresh_refs = []
-    for block in range(REFRESH_BLOCKS):
+    for block in range(REFRESH_BLOCKS if include_refresh else 0):
         composed = list(public.refresh(0, block))
         for bit, selected in enumerate(prover.refresh_r_bits):
             if selected:

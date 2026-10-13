@@ -20,7 +20,7 @@ def center(value):
     return value - SINGLE88_PRIME if value > SINGLE88_PRIME // 2 else value
 
 
-def make_bridge(public, prover, block, *, compact=True):
+def make_bridge(public, prover, block, *, compact=True, convolution=None):
     n = len(prover.witness_poly(0))
     rows = [public.refresh(index, block) for index in range(REFRESH_BITS + 1)]
     raw = [int(v) for v in rows[0]]
@@ -56,7 +56,7 @@ def make_bridge(public, prover, block, *, compact=True):
     return compile_single88_bridge_fast(
         matrix, witness, target=target, base=BASE,
         witness_digits=(1 if compact else 9),
-        quotient_digits=(3 if compact else 16))
+        quotient_digits=(3 if compact else 16), convolution=convolution)
 
 
 def main():

@@ -184,3 +184,87 @@ PYTHONPATH=OURS/experiments/q88_latency_20261008:OURS/code/entities/zk_lazer:laz
 LD_LIBRARY_PATH=lazer /root/miniconda3/envs/sage/bin/python -u \
 OURS/experiments/q88_latency_20261008/q88_single88_joint_profile.py --negative-check
 ```
+
+## Preparation reuse and resident measurements (2026-10-13)
+
+Only files under `OURS/experiments/q88_latency_20261008` changed. Production
+CRT code, the baseline worker and all proof-engine libraries were read only.
+The isolated driver imports the baseline's phase scopes rather than editing
+them. No prime, witness dimension, constraint or public norm budget was
+changed by this optimization: the joint statement still has 999 vectors,
+364 polynomial constraints, 176 degree-zero checks and 24 integer links.
+
+Changes retained:
+
+- Batched preparation FFT in `q88_profile_fft.py`, with integer shortcuts
+  for scalar factors and bounded batches for dense digit products.
+- Reuse the public/private digits already produced by that invocation of
+  the FFT. No digits are cached across changing witnesses or masks.
+- Construct the handle prefix without generating effective refresh columns
+  that the joint adapter would immediately discard.
+- Omit zero linear terms and reuse public scalar polynomials while building
+  the native statement. Constraint predicates and norm budgets remain.
+- `--runs` reuses the same fixed native statement, witness and Pack parameters
+  while generating fresh proof objects. Every round performs Pack Verify,
+  serialization, deserialization and reload verification. Serialized hashes
+  must differ. Decoded and resident proof objects are explicitly released.
+
+The FFT was compared with the existing reference on degrees 16, 64, 256 and
+4096, including scalar and zero columns. Reused digits matched independent
+`_decompose` output. The small full bridge also passed the independent integer
+negacyclic recurrence and matched the reference bridge. These checks are
+reproducible with `q88_profile_fft_check.py`. The final native run also passed
+selector/product/shared-handle tampering rejection and restoration checks.
+
+| Measurement | preparation | Prove | Verify | serialized proof |
+|---|---:|---:|---:|---:|
+| Previous hardened joint gate | 91.823 s | 9.863 s | 7.477 s | 171.583 KiB |
+| Optimized, cold round | 45.890 s | 9.807 s | 7.702 s | 171.583 KiB |
+| Optimized, fixed-instance resident round | already prepared | 10.434 s | 6.882 s | 171.583 KiB |
+
+Cold Prove includes Pack parameter generation; resident Prove excludes it.
+Preparation is the measured bridge + native statement construction interval,
+after payload decoding; it includes Clear Verify but excludes the optional
+negative probes. Resident results only repeat the same captured instance:
+they do not establish zero preparation cost for a new show, witness or RHS.
+
+Preparation sub-stages in the retained final run:
+
+| Stage | Time |
+|---|---:|
+| six refresh bridges | 11.743 s |
+| refresh product construction | 2.205 s |
+| handle prefix | 1.881 s |
+| main bridge and product-column registration | 4.575 s |
+| native statement and Clear Verify | 25.486 s |
+
+Measurements are saved in `single88_preparation_reuse_20261013.json`.
+Preparation fell by approximately 50%; Prove/Verify did not show a stable
+overall reduction, and the 3 s / 1.5 s target remains unmet.
+
+Two kernel experiments were not made defaults:
+
+- Additional Gaussian/from-poly/projection budgets of eight threads and
+  addcheck/projection parallel flags: three fresh proofs passed with
+  Prove 9.545-10.479 s and Verify 7.005-7.332 s. Available explicitly through
+  `--parallel-kernels`, with no demonstrated stable speed advantage.
+- `REVAC_LABRADOR_THREADS=1`, `REVAC_LABRADOR_THREADS_VERIFY=6`,
+  `REVAC_LABRADOR_GAUSSIAN_THREADS=8`: two fresh proofs passed with Prove
+  11.711/11.896 s and Verify 6.996/6.735 s, so the prover regression rules
+  this out as a default. Data are in `single88_phase_budget_20261013.json`.
+
+Reproduce the retained configuration:
+
+```sh
+cd /root/autodl-tmp/pq_ac
+PYTHONPATH=OURS/experiments/q88_latency_20261008:OURS/code/entities/zk_lazer:lazer/python:Lazer-Acc/python \
+LD_LIBRARY_PATH=lazer /root/miniconda3/envs/sage/bin/python -u \
+OURS/experiments/q88_latency_20261008/q88_single88_joint_profile.py \
+--negative-check --runs 2 --result-json /tmp/single88_result.json
+```
+
+`--reference-preparation` selects the old FFT/decomposition path for
+arithmetic comparison; it does not revert all statement/preparation edits.
+The security and target-distribution boundary of the isolated profile above
+is unchanged. These measurements are not a production security-equivalence
+claim or a complete credential benchmark.

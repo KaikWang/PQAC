@@ -494,7 +494,8 @@ def compile_single88_bridge_fast(matrix: Sequence[Sequence[int]],
                                  base: int = 128,
                                  witness_digits: int = 9,
                                  quotient_digits: int = 16,
-                                 modulus: int = SINGLE88_PRIME) -> Single88Bridge:
+                                 modulus: int = SINGLE88_PRIME,
+                                 convolution=None) -> Single88Bridge:
     """Construct the same single-prime bridge with exact digit FFT sums.
 
     ``target=None`` derives a fresh public target from the supplied bounded
@@ -521,7 +522,8 @@ def compile_single88_bridge_fast(matrix: Sequence[Sequence[int]],
         from Lazer_Acc.python.exact_negacyclic_fft import digit_sum_negacyclic
     bits = base.bit_length() - 1
     matrix_count = max(1, (modulus.bit_length() + bits - 1) // bits)
-    conv = digit_sum_negacyclic(matrix, witness, bits,
+    convolution = convolution or digit_sum_negacyclic
+    conv = convolution(matrix, witness, bits,
                                 matrix_count, witness_digits)
     total = [sum(layer[k] * base ** layer_index
                   for layer_index, layer in enumerate(conv))
@@ -536,10 +538,12 @@ def compile_single88_bridge_fast(matrix: Sequence[Sequence[int]],
     if any(value % modulus for value in difference):
         raise ValueError("single q88 relation is not congruent modulo prime")
     quotient = [value // modulus for value in difference]
-    h = [_decompose(poly, base, matrix_count, signed=False)
-         for poly in matrix]
-    w = [_decompose(poly, base, witness_digits, signed=True)
-         for poly in witness]
+    h = getattr(conv, "h_digits", None)
+    w = getattr(conv, "w_digits", None)
+    if h is None:
+        h = [_decompose(poly, base, matrix_count, signed=False) for poly in matrix]
+    if w is None:
+        w = [_decompose(poly, base, witness_digits, signed=True) for poly in witness]
     q_digits = _digits(modulus, base, matrix_count, signed=False)
     t = _decompose(centered_target, base, matrix_count, signed=False)
     q = _decompose(quotient, base, quotient_digits, signed=True)
@@ -1204,6 +1208,11 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
     max_bridge_bound = 0
     zero = poly_t(ring, [0] * degree)
     one = poly_t(ring, [1] + [0] * (degree - 1))
+    scalar_polys = {0: zero, 1: one}
+    def scalar_poly(value):
+        if value not in scalar_polys:
+            scalar_polys[value] = poly_t(ring, [value]+[0]*(degree-1))
+        return scalar_polys[value]
     for block, bridge in enumerate(bridges):
         columns = len(bridge.w_digits)
         for layer in range(bridge.equation_count()):
@@ -1219,10 +1228,13 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
                     end = min(start + group_size, columns)
                     block_values = [bridge.h_digits[index][public_layer]
                                     for index in range(start, end)]
-                    pv = polyvec_t(ring, len(block_values))
-                    for index, value in enumerate(block_values):
-                        pv[index] = poly_t(ring, list(value))
-                    terms.append(pv)
+                    value = block_values[0]  # singleton columns checked above
+                    if not any(value):
+                        continue
+                    if not any(value[1:]):
+                        terms.append(scalar_poly(value[0]))
+                    else:
+                        terms.append(poly_t(ring, list(value)))
                     ref = (block, "w", witness_layer, start)
                     witnesses.append(ref_to_index[ref])
                     coefficient_bound += sum(ceil_sqrt(sum(v*v for v in p))
@@ -1230,17 +1242,16 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
             for q_layer, modulus_digit in enumerate(bridge.q_digits):
                 q_index = layer - q_layer
                 if 0 <= q_index < len(bridge.quotient_digits):
-                    terms.append(poly_t(ring, [-modulus_digit] + [0] * (degree - 1)))
+                    terms.append(scalar_poly(-modulus_digit))
                     witnesses.append(ref_to_index[(block, "q", q_index, 0)])
                     coefficient_bound += abs(modulus_digit) * radius[(block, "q", q_index, 0)]
             if layer:
                 for digit in range(len(carry_layers[block][layer - 1])):
-                    terms.append(poly_t(ring, [bridge.base ** digit] + [0] * (degree - 1)))
+                    terms.append(scalar_poly(bridge.base ** digit))
                     witnesses.append(ref_to_index[(block, "c", layer - 1, digit)])
                     coefficient_bound += bridge.base**digit * radius[(block, "c", layer-1, digit)]
             for digit in range(len(carry_layers[block][layer])):
-                terms.append(poly_t(ring, [-(bridge.base ** (digit + 1))] +
-                                    [0] * (degree - 1)))
+                terms.append(scalar_poly(-(bridge.base ** (digit + 1))))
                 witnesses.append(ref_to_index[(block, "c", layer, digit)])
                 coefficient_bound += bridge.base**(digit+1) * radius[(block, "c", layer, digit)]
             rhs = bridge.target_digits[layer] if layer < len(bridge.target_digits) else [0] * degree
@@ -1257,7 +1268,7 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
         if public_radix_norms and terminal_bound >= PACK_MODULUS:
             raise ValueError("terminal carry predicate permits Pack-field wrap")
         statement.append_statement(
-            [poly_t(ring, [bridge.base**digit]+[0]*(degree-1)) for digit in range(count)],
+            [scalar_poly(bridge.base**digit) for digit in range(count)],
             [ref_to_index[(block, "c", last, digit)] for digit in range(count)], zero)
     statement.bridge_coefficient_bound = max_bridge_bound
     # Shared selector vectors are binary once; aliases already force every

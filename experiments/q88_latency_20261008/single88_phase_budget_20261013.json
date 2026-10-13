@@ -1,0 +1,29 @@
+{
+  "bridge_seconds": 20.601710133254528,
+  "statement_seconds": 25.08949565142393,
+  "preparation_seconds": 45.69120578467846,
+  "preparation_stages": {
+    "refresh_bridges": 12.146846011281013,
+    "refresh_products": 2.08090902864933,
+    "handle_relation": 1.8545314446091652,
+    "main_bridge": 4.519358351826668
+  },
+  "witness_vectors": 999,
+  "constraints": 364,
+  "bridge_coefficient_bound": 12417187967,
+  "fixed_instance_repeats": true,
+  "rounds": [
+    {
+      "prove": 11.711349859833717,
+      "verify": 6.995965741574764,
+      "bytes": 175381,
+      "proof_sha256": "1e4ccc4dbb5133403076266d9e83a3650b39ef6227192ceda89d6c2f3386dd34"
+    },
+    {
+      "prove": 11.895884916186333,
+      "verify": 6.735256843268871,
+      "bytes": 175701,
+      "proof_sha256": "3a472b9908f15fc32090f55ba4832b84e094276ada71bc4f3f30c7fed02fa229"
+    }
+  ]
+}
