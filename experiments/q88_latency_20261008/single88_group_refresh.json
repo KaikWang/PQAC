@@ -1,0 +1,62 @@
+{
+  "bridge_seconds": 20.12413089722395,
+  "statement_seconds": 18.699137903749943,
+  "preparation_seconds": 38.82326880097389,
+  "preparation_stages": {
+    "refresh_bridges": 11.647183001041412,
+    "refresh_products": 2.085545338690281,
+    "handle_relation": 1.9033519849181175,
+    "main_bridge": 4.487982638180256
+  },
+  "witness_vectors": 872,
+  "constraints": 1676,
+  "bridge_coefficient_bound": 12417187967,
+  "fixed_instance_repeats": true,
+  "rounds": [
+    {
+      "prove": 6.41218788921833,
+      "verify": 4.307333059608936,
+      "bytes": 169516,
+      "proof_sha256": "d429e7f3e419fd330223e8f05837bb91541e5d9ed30f3586e29a79778e6ed697"
+    },
+    {
+      "prove": 6.609268881380558,
+      "verify": 4.226798392832279,
+      "bytes": 169804,
+      "proof_sha256": "b7cc532384fa39e1ca9d2b1f45352662ff7294b7b483e3c834621c9683c8f837"
+    },
+    {
+      "prove": 6.522592946887016,
+      "verify": 4.097737289965153,
+      "bytes": 169804,
+      "proof_sha256": "5d5d4082c723153cbddb401ece37e16ab471e7d494cb9e4809e37602f7c8009d"
+    }
+  ],
+  "native_array_assembler": true,
+  "linear_group_size": 1,
+  "scalar_refresh": true,
+  "group_refresh": true,
+  "changed_instance_rounds": [
+    {
+      "prove": 7.0202330350875854,
+      "verify": 4.5584417805075645,
+      "bytes": 169356,
+      "proof_sha256": "78398f5077bc15397894344e4a6f1ecbd0657a9adc77eeb86302cda56414678d",
+      "bridge_seconds": 9.98142496496439,
+      "statement_seconds": 15.774934686720371,
+      "preparation_seconds": 25.75635965168476,
+      "changed_selector": 0
+    }
+  ],
+  "public_cache_bytes": 740337984,
+  "public_cache_hits": 165,
+  "resident_transcript_checked": true,
+  "runtime_settings": {
+    "REVAC_LABRADOR_THREADS": null,
+    "REVAC_LABRADOR_THREADS_PROVE": null,
+    "REVAC_LABRADOR_THREADS_VERIFY": null,
+    "REVAC_LABRADOR_GAUSSIAN_THREADS": null,
+    "REVAC_LABRADOR_FROMPOLY_THREADS": null,
+    "REVAC_LABRADOR_LDD_PROJECTION_THREADS": null
+  }
+}

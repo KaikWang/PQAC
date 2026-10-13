@@ -268,3 +268,141 @@ arithmetic comparison; it does not revert all statement/preparation edits.
 The security and target-distribution boundary of the isolated profile above
 is unchanged. These measurements are not a production security-equivalence
 claim or a complete credential benchmark.
+
+## 2026-10-13: baseline array, scalar and grouped witness layouts
+
+The production baseline under `code/entities/zk_lazer` and both proof-engine
+repositories were read only. Changes are confined to this experiment folder.
+The new `--baseline-layout` preset borrows the following production ideas:
+
+1. Contiguous NumPy buffers and `append_witness_pointer`,
+   `append_constraint` and `append_quadratic`, instead of building LaZer
+   polynomial objects and copying their coefficients back to Python.
+2. Degree-256 scalar refresh selectors. Every original degree-4096 refresh
+   equation is expanded exactly into 16 degree-256 phase equations. Full-ring
+   operands in these refresh equations have scalar coefficients; the compiler
+   rejects dense coefficients on those operands. Main and product equations
+   retain the degree-4096 ring.
+3. One native `BIN` vector for the 128 selectors, one for the 24 full-ring
+   handle bits and one for their 24 q19 representations. All 176 logical
+   degree-zero predicates and all 24 integer shared-handle bindings remain.
+4. Six right-witness vectors and six vector dot products, each representing
+   exactly the original 24 handle-bit/right-witness products. Each right group
+   uses the original **single-vector** squared-norm budget, not its sum.
+   The compiler rejects inputs that exceed this stronger group predicate.
+5. A resident native statement, fixed Pack parameters and immutable public
+   matrices/digits. Every dynamic witness is loaded again and every proof uses
+   fresh randomness. Cached coefficient/layout fingerprints, norm profiles,
+   vector memberships and integer bindings must match before reuse.
+6. Exact int64 NumPy dot products for public radix coefficient norms. Digit
+   range and overflow bounds are checked first; no floating-point norm
+   approximation is used.
+
+The separate polynomial `x*x-x` predicates for these grouped binary vectors
+are redundant: native `BIN` processing already compiles binary constraints
+into the Pack proof (`proofsystem.c`, `statement_compilebin`). Their removal
+does not remove the native binary proof or any degree-zero predicate. Native
+Clear Verify rejects a selector coefficient changed to 2. Flips of selector
+bits, product digits, first/last q19 handle bits are also rejected and restored.
+
+The new layout has 688 native witness vectors, 1652 Rq constraints, 176
+degree-zero predicates and 24 integer constraints. The larger Rq count is
+partly phase expansion: one rank-16 refresh equation becomes 16 rank-1
+equations with exactly the same equality. Moving the 128 scalar selectors
+from degree 4096 to 256 removes 1920 base-ring witness polynomials and
+491520 redundant zero coordinates. Vector grouping alone must not be
+reported as the same reduction in coefficient/witness dimension.
+
+### Transcript and resident-cache checks
+
+`q88_native_arrays_check.py` compares object and native assembly hashes at
+degrees 256 and 4096, including signed RHS, large public scalars, integer
+bindings and quadratics. After loading a different witness and RHS, the
+resident hash matches a fresh object assembly. A changed public coefficient
+is rejected by the resident cache. The full joint runs also compare the
+resident statement hash with an independently rebuilt native statement.
+
+The ordinary `statement_rebind_tail` path did not preserve the cold signed-RHS
+hash in the independent check. The experiment therefore uses the existing
+`statement_rebind_constraint_raw` API with the original signed buffers and
+verified immutable coefficients. It leaves the coefficient graph resident.
+It does not enable the baseline's compact-hash flag; that flag requires its
+own semantic statement digest and is explicitly rejected in this profile.
+No proof-engine or baseline source was changed to implement this workaround.
+
+`q88_profile_fft_check.py` also compares cached public preparation against the
+reference after changing the private witness. Only public digits are cached;
+the cache byte limit is configurable. The measurement preset uses a 768 MiB
+digit-cache limit and records its estimated occupied bytes and hit count.
+
+### Measurements before the final preparation vectorization
+
+All rows below passed Clear Verify, Pack Verify, serialization, deserialization
+and reload Verify on `autodl-pqa11`. These are isolated single-prime profile
+measurements, not production CRT replacement measurements.
+
+| Layout | Cold preparation | Three Prove runs | Three Verify runs | Pack bytes |
+|---|---:|---:|---:|---:|
+| Native buffers, original layout | 30.965 s | 10.409–10.447 s | 7.134–7.360 s | 175701 |
+| Scalar refresh selectors | 38.822 s | 6.564–7.310 s | 4.450–4.726 s | 169516–169804 |
+| Scalar selectors, one BIN vector | 38.823 s | 6.412–6.609 s | 4.098–4.307 s | 169516–169804 |
+| Grouped scalar selectors and handle dot products | 41.179 s | 6.163–7.248 s | 3.761–3.839 s | 175701 |
+
+The grouped handle layout takes more preparation than plain arrays; it is
+not a universal preparation-time win. A changed-selector resident run took
+27.491 s preparation, 7.290 s Prove and 3.924 s Verify, with 175701 bytes.
+The previous retained profile took 45.890 s preparation and approximately
+9.8–10.4 s Prove / 6.9–7.7 s Verify. Pairing quotient/carry vectors reduced
+the proof to 169804 bytes but did not show a stable time gain; it remains an
+explicit `--linear-group-size 2` experiment, incompatible with this preset.
+
+The historical production baseline in
+`ACC_PROOF_SIZE_COMPARISON_20261010.md` reports 4.626–4.960 s Prove /
+2.429–2.782 s Verify and approximately 193.75–194.22 KiB. It was not rerun
+for this comparison, and its envelope/statement/security scope differs from
+this single-prime Pack body. Baseline latency and the 3 s / 1.5 s target have
+not been achieved. Original accumulator parameters, beta bounds, update
+capacity and single-prime security equivalence still require the audits
+described earlier. The stronger right-group predicate can reject some inputs
+accepted by the old layout; this is another reason to retain the old profile
+and not replace production CRT.
+
+Reproduce the baseline-derived layout and the changed-instance gate:
+
+```sh
+cd /root/autodl-tmp/pq_ac
+PYTHONPATH=OURS/experiments/q88_latency_20261008:OURS/code/entities/zk_lazer:lazer/python:Lazer-Acc/python \
+LD_LIBRARY_PATH=lazer /root/miniconda3/envs/sage/bin/python -u \
+OURS/experiments/q88_latency_20261008/q88_single88_joint_profile.py \
+--baseline-layout --negative-check --runs 3 --prepare-runs 2 \
+--check-resident-transcript --result-json /tmp/single88_baseline_layout.json
+```
+
+`--runs` measures fresh proofs for a fixed instance. `--prepare-runs` changes
+the refresh selector and reconstructs its bridges/products/target, loads the
+new witness into the resident statement and reuses compatible Pack parameters.
+It is a changed synthetic single-prime instance, not a complete credential show
+or a production accumulator update. Timing excludes optional tamper probes and
+the independent fresh-statement comparison. Cold Prove includes parameter
+generation. Changed-instance preparation is not zero and must be counted.
+
+### Final vectorized preparation measurement
+
+`single88_baseline_layout_vectorized.json` records the retained preset after
+the exact public coefficient norm calculation was vectorized:
+
+| Round | Preparation | Prove | Verify | Serialized Pack body |
+|---|---:|---:|---:|---:|
+| Cold | 39.346 s | 6.579 s | 3.910 s | 175701 B (171.583 KiB) |
+| Fixed instance, fresh proof 2 | already prepared | 6.973 s | 4.118 s | 175701 B |
+| Fixed instance, fresh proof 3 | already prepared | 6.391 s | 3.806 s | 175701 B |
+| Changed selector, resident graph | 24.934 s | 6.968 s | 3.981 s | 175701 B |
+
+All gates passed, including first/last shared-handle flips, a nonbinary selector
+coefficient, product tampering and cold/resident full transcript equality.
+The serialized SHA256 values are different for every proof. Compared with
+the earlier 45.890 s preparation run, cold preparation is 14.3% lower; the
+resident changed-selector preparation is 45.7% lower, although it uses a
+different preparation protocol. The strongest time improvement remains the
+scalar refresh representation. These results still do not match the production
+baseline or reach 3 s / 1.5 s, and they do not change the security boundary.

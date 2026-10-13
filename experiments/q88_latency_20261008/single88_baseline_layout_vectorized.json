@@ -1,0 +1,63 @@
+{
+  "bridge_seconds": 21.015592217445374,
+  "statement_seconds": 18.330051317811012,
+  "preparation_seconds": 39.345643535256386,
+  "preparation_stages": {
+    "refresh_bridges": 11.668250888586044,
+    "refresh_products": 2.499168187379837,
+    "handle_relation": 1.9018724858760834,
+    "main_bridge": 4.946202322840691
+  },
+  "witness_vectors": 688,
+  "constraints": 1652,
+  "bridge_coefficient_bound": 12417187967,
+  "fixed_instance_repeats": true,
+  "rounds": [
+    {
+      "prove": 6.57904726266861,
+      "verify": 3.9096460044384003,
+      "bytes": 175701,
+      "proof_sha256": "7545bfa6f8ed76b5a64ae0b3524ab5461f5a9ab2565037198e24b7d7eaa6ffc8"
+    },
+    {
+      "prove": 6.972505494952202,
+      "verify": 4.117955826222897,
+      "bytes": 175701,
+      "proof_sha256": "aae0b4e52a74e922f06842d48a67770fc4b30a1e943ed14e0dfd9d51cfe0fe74"
+    },
+    {
+      "prove": 6.391303405165672,
+      "verify": 3.80631136149168,
+      "bytes": 175701,
+      "proof_sha256": "9893c6cbd94656908bb529b04749fa212aa71a6e7bf72c304cb4b581dd65de81"
+    }
+  ],
+  "native_array_assembler": true,
+  "linear_group_size": 1,
+  "scalar_refresh": true,
+  "group_refresh": true,
+  "group_handles": true,
+  "changed_instance_rounds": [
+    {
+      "prove": 6.967994876205921,
+      "verify": 3.9813687577843666,
+      "bytes": 175701,
+      "proof_sha256": "51e3ebae51a584d099029873516dfcaf3b357e5633cb7b450be91b33865efa5f",
+      "bridge_seconds": 10.826504416763783,
+      "statement_seconds": 14.107790686190128,
+      "preparation_seconds": 24.93429510295391,
+      "changed_selector": 0
+    }
+  ],
+  "public_cache_bytes": 740337984,
+  "public_cache_hits": 165,
+  "resident_transcript_checked": true,
+  "runtime_settings": {
+    "REVAC_LABRADOR_THREADS": null,
+    "REVAC_LABRADOR_THREADS_PROVE": null,
+    "REVAC_LABRADOR_THREADS_VERIFY": null,
+    "REVAC_LABRADOR_GAUSSIAN_THREADS": null,
+    "REVAC_LABRADOR_FROMPOLY_THREADS": null,
+    "REVAC_LABRADOR_LDD_PROJECTION_THREADS": null
+  }
+}

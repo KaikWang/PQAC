@@ -1,0 +1,54 @@
+{
+  "bridge_seconds": 20.37302379310131,
+  "statement_seconds": 11.369423851370811,
+  "preparation_seconds": 31.742447644472122,
+  "preparation_stages": {
+    "refresh_bridges": 11.70975898951292,
+    "refresh_products": 2.0801465660333633,
+    "handle_relation": 1.9306677281856537,
+    "main_bridge": 4.652387417852879
+  },
+  "witness_vectors": 999,
+  "constraints": 364,
+  "bridge_coefficient_bound": 12417187967,
+  "fixed_instance_repeats": true,
+  "rounds": [
+    {
+      "prove": 11.620330400764942,
+      "verify": 7.652849145233631,
+      "bytes": 175701,
+      "proof_sha256": "8422e1af8c78509ac1163560631b8a198422bed244c47a69c11fea1299cdc20c"
+    },
+    {
+      "prove": 10.28524336218834,
+      "verify": 7.096262589097023,
+      "bytes": 175701,
+      "proof_sha256": "681c8697afbec2dfb9c18b905ead1c072e80c06a4407b90a4a1af8d68c78baf4"
+    }
+  ],
+  "native_array_assembler": true,
+  "linear_group_size": 1,
+  "changed_instance_rounds": [
+    {
+      "prove": 9.65721207857132,
+      "verify": 7.59824712574482,
+      "bytes": 175701,
+      "proof_sha256": "e06b3d1e79d7d95a767cba9979bc5ec0bf799b2d72cd31a0e278b5d6142907ed",
+      "bridge_seconds": 10.113269113004208,
+      "statement_seconds": 10.31084144860506,
+      "preparation_seconds": 20.424110561609268,
+      "changed_selector": 0
+    }
+  ],
+  "public_cache_bytes": 740337984,
+  "public_cache_hits": 165,
+  "resident_transcript_checked": true,
+  "runtime_settings": {
+    "REVAC_LABRADOR_THREADS": null,
+    "REVAC_LABRADOR_THREADS_PROVE": null,
+    "REVAC_LABRADOR_THREADS_VERIFY": null,
+    "REVAC_LABRADOR_GAUSSIAN_THREADS": null,
+    "REVAC_LABRADOR_FROMPOLY_THREADS": null,
+    "REVAC_LABRADOR_LDD_PROJECTION_THREADS": null
+  }
+}

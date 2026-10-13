@@ -1,0 +1,45 @@
+{
+  "bridge_seconds": 20.18421407788992,
+  "statement_seconds": 11.79282846301794,
+  "preparation_seconds": 31.97704254090786,
+  "preparation_stages": {
+    "refresh_bridges": 11.80768346786499,
+    "refresh_products": 2.0553979873657227,
+    "handle_relation": 1.8584983721375465,
+    "main_bridge": 4.462574772536755
+  },
+  "witness_vectors": 862,
+  "constraints": 364,
+  "bridge_coefficient_bound": 12417187967,
+  "fixed_instance_repeats": true,
+  "rounds": [
+    {
+      "prove": 9.791563302278519,
+      "verify": 7.264878965914249,
+      "bytes": 169804,
+      "proof_sha256": "73273e05e26e5b39e1296c6a5bc14e416d07565aa2a34fc33785d99f9448c96c"
+    },
+    {
+      "prove": 10.206536911427975,
+      "verify": 7.2096312791109085,
+      "bytes": 169804,
+      "proof_sha256": "44477ac01345b304c242ab3c92dddb4615133f38d670ebda21b28bb451b448f2"
+    },
+    {
+      "prove": 11.577714391052723,
+      "verify": 7.004981756210327,
+      "bytes": 169804,
+      "proof_sha256": "130452423a924291c278e2fbf599e8d4a8f87a2ad9dfddc3008a75e3c8f2745d"
+    }
+  ],
+  "native_array_assembler": true,
+  "linear_group_size": 2,
+  "runtime_settings": {
+    "REVAC_LABRADOR_THREADS": null,
+    "REVAC_LABRADOR_THREADS_PROVE": null,
+    "REVAC_LABRADOR_THREADS_VERIFY": null,
+    "REVAC_LABRADOR_GAUSSIAN_THREADS": null,
+    "REVAC_LABRADOR_FROMPOLY_THREADS": null,
+    "REVAC_LABRADOR_LDD_PROJECTION_THREADS": null
+  }
+}

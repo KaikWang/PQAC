@@ -25,7 +25,7 @@ def layers(polys, bits, count, signed):
 
 
 def digit_sum_negacyclic(matrix, witness, bits=7, left_count=13,
-                         right_count=3):
+                         right_count=3, *, public_cache=None):
     if not matrix or len(matrix) != len(witness):
         raise ValueError("batched FFT matrix/witness mismatch")
     n = len(matrix[0])
@@ -37,7 +37,9 @@ def digit_sum_negacyclic(matrix, witness, bits=7, left_count=13,
     result = np.zeros((left_count+right_count, n), dtype=np.int64)
     h_digits, w_digits = [], []
     for start in range(0, len(matrix), 16):
-        h = layers(matrix[start:start+16], bits, left_count, False)
+        columns = matrix[start:start+16]
+        h = (layers(columns, bits, left_count, False) if public_cache is None
+             else public_cache.digits(columns, bits, left_count))
         w = layers(witness[start:start+16], bits, right_count, True)
         h_digits.extend(h.tolist())
         w_digits.extend(w.tolist())
@@ -72,3 +74,33 @@ def digit_sum_negacyclic(matrix, witness, bits=7, left_count=13,
     output.h_digits = h_digits
     output.w_digits = w_digits
     return output
+
+
+class PublicDigitCache:
+    """Bounded public-only cache; no witness digits, masks or responses."""
+    def __init__(self, byte_limit=128 << 20):
+        from collections import OrderedDict
+        self.entries = OrderedDict()
+        self.byte_limit, self.bytes, self.hits = byte_limit, 0, 0
+
+    def digits(self, columns, bits, count):
+        key = (bits, count, tuple(tuple(p) for p in columns))
+        if key in self.entries:
+            self.hits += 1
+            self.entries.move_to_end(key)
+            return self.entries[key][0]
+        values = layers(columns, bits, count, False)
+        values.flags.writeable = False
+        # Include the key's Python integer/tuple footprint in the budget.
+        footprint = values.nbytes + sum(48*len(p)+64 for p in columns)
+        if footprint <= self.byte_limit:
+            while self.entries and self.bytes+footprint > self.byte_limit:
+                _, (_, previous_size) = self.entries.popitem(last=False)
+                self.bytes -= previous_size
+            self.entries[key] = values, footprint
+            self.bytes += footprint
+        return values
+
+    def __call__(self, matrix, witness, bits=7, left_count=13, right_count=3):
+        return digit_sum_negacyclic(matrix, witness, bits, left_count, right_count,
+                                    public_cache=self)

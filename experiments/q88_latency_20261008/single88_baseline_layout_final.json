@@ -1,0 +1,57 @@
+{
+  "bridge_seconds": 21.329190097749233,
+  "statement_seconds": 20.876538701355457,
+  "preparation_seconds": 42.20572879910469,
+  "preparation_stages": {
+    "refresh_bridges": 12.474721781909466,
+    "refresh_products": 2.262324959039688,
+    "handle_relation": 1.930018201470375,
+    "main_bridge": 4.662041679024696
+  },
+  "witness_vectors": 688,
+  "constraints": 1652,
+  "bridge_coefficient_bound": 12417187967,
+  "fixed_instance_repeats": true,
+  "rounds": [
+    {
+      "prove": 6.586675249040127,
+      "verify": 3.914602182805538,
+      "bytes": 175669,
+      "proof_sha256": "61ab2a2fbe2eec525a728e27b45c97cd85de8591fff9df6d336ac7c7b583c248"
+    },
+    {
+      "prove": 7.02533221244812,
+      "verify": 4.10396371036768,
+      "bytes": 175701,
+      "proof_sha256": "1ebc7950f398a3d27f4c2a569fcfa25c0bf638834c97f3b94e15aee008b2e85b"
+    }
+  ],
+  "native_array_assembler": true,
+  "linear_group_size": 1,
+  "scalar_refresh": true,
+  "group_refresh": true,
+  "group_handles": true,
+  "changed_instance_rounds": [
+    {
+      "prove": 7.161715514957905,
+      "verify": 3.934871628880501,
+      "bytes": 175701,
+      "proof_sha256": "81c5c91feafab12016fbc34074b8ecec7e4dd9b80aca0ec5241adb781fd86686",
+      "bridge_seconds": 10.451475717127323,
+      "statement_seconds": 17.240032978355885,
+      "preparation_seconds": 27.691508695483208,
+      "changed_selector": 0
+    }
+  ],
+  "public_cache_bytes": 740337984,
+  "public_cache_hits": 165,
+  "resident_transcript_checked": true,
+  "runtime_settings": {
+    "REVAC_LABRADOR_THREADS": null,
+    "REVAC_LABRADOR_THREADS_PROVE": null,
+    "REVAC_LABRADOR_THREADS_VERIFY": null,
+    "REVAC_LABRADOR_GAUSSIAN_THREADS": null,
+    "REVAC_LABRADOR_FROMPOLY_THREADS": null,
+    "REVAC_LABRADOR_LDD_PROJECTION_THREADS": null
+  }
+}

@@ -1057,7 +1057,10 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
                                       extra_bridges=(), witness_aliases=None,
                                       witness_layer_counts=None,
                                       extra_deg0=(), extra_linear=(),
-                                      extra_integers=()):
+                                      extra_integers=(), native_arrays=False,
+                                      linear_group_size=1, resident_statement=None,
+                                      scalar_refresh=False, group_refresh=False,
+                                      vector_groups=()):
     """Put independent exact bridges into one Pack statement.
 
     This is used for the six refresh blocks. Each block keeps its own carry
@@ -1067,6 +1070,10 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
     """
     from lazer import poly_t, polyvec_t, polyring_t
     from labrados import proof_statement, lib
+    if native_arrays:
+        from q88_native_arrays import (ArrayPolynomial as poly_t,
+                                       ArrayVector as polyvec_t,
+                                       install_array_assembler)
     extra_witness = list(extra_witness)
     extra_quadratics = list(extra_quadratics)
     extra_deg0 = list(extra_deg0)
@@ -1090,9 +1097,19 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
     bridges = list(bridges) + list(extra_bridges)
     degree = bridges[0].degree
     ring = polyring_t(degree, PACK_MODULUS)
+    scalar_ring = polyring_t(256, PACK_MODULUS)
+    if native_arrays:
+        import numpy as np
+    if scalar_refresh and not native_arrays:
+        raise ValueError("scalar refresh requires the native array assembler")
+    if group_refresh and (not scalar_refresh or linear_group_size != 1):
+        raise ValueError("group refresh requires scalar refresh without carry grouping")
     def radix_norm(values):
         if public_radix_norms:
-            if any(abs(v) > bridges[0].base // 2 for v in values):
+            exceeds = (int(np.max(values)) > bridges[0].base//2 or
+                       int(np.min(values)) < -bridges[0].base//2) if native_arrays else any(
+                           abs(v) > bridges[0].base//2 for v in values)
+            if exceeds:
                 raise ValueError("refresh radix digit exceeds public bound")
             return degree * (bridges[0].base // 2) ** 2
         return max(1, sum(v*v for v in values))
@@ -1140,6 +1157,10 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
                 if is_selector and block:
                     aliases[ref] = (0, "w", layer, start)
                     continue
+                if scalar_refresh and is_selector:
+                    small = polyvec_t(scalar_ring, 1)
+                    small[0] = poly_t(scalar_ring, list(values[0][:256]))
+                    pv = small
                 vectors.append(pv)
                 norms.append(0 if is_selector else sum(radix_norm(p) for p in values))
                 refs.append(ref)
@@ -1186,24 +1207,158 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
         vectors.append(pv)
         norms.append(norm)
         refs.append(item["ref"])
+    original_norms = list(norms)
+    original_shapes = {ref: (v.ring.deg, v.dim) for ref, v in zip(refs, vectors)}
+    vector_refs = [[ref] for ref in refs]
+    offsets = {ref: 0 for ref in refs}
+    if vector_groups:
+        if not native_arrays or linear_group_size != 1 or group_refresh:
+            raise ValueError("explicit vector groups need the standalone native group layout")
+        import numpy as np
+        inventory = {ref: i for i, ref in enumerate(refs)}
+        used, new_vectors, new_norms, new_refs = set(), [], [], []
+        for group in vector_groups:
+            indices = [inventory[ref] for ref in group]
+            if used.intersection(indices) or len(set(indices)) != len(indices):
+                raise ValueError("overlapping explicit vector groups")
+            used.update(indices)
+            group_ring = vectors[indices[0]].ring
+            if any(vectors[i].dim != 1 or vectors[i].ring.deg != group_ring.deg
+                   or (norms[i] == 0) != (norms[indices[0]] == 0) for i in indices):
+                raise ValueError("explicit group degree or norm type mismatch")
+            vector = polyvec_t(group_ring, len(indices))
+            vector.values[:] = np.concatenate([vectors[i].values for i in indices])
+            budget = min(norms[i] for i in indices)
+            if budget and sum(int(v)*int(v) for v in vector.values.flat) > budget:
+                raise ValueError("explicit group exceeds original single-vector norm budget")
+            new_vectors.append(vector)
+            new_norms.append(budget)
+            new_refs.append(list(group))
+        for i, ref in enumerate(refs):
+            if i not in used:
+                new_vectors.append(vectors[i])
+                new_norms.append(norms[i])
+                new_refs.append([ref])
+        vectors, norms, vector_refs = new_vectors, new_norms, new_refs
+    if group_refresh:
+        import numpy as np
+        selector_indices = [i for i, ref in enumerate(refs)
+                            if len(ref) == 4 and ref[:3] == (0, "w", 0) and ref[3] < REFRESH_BITS]
+        if len(selector_indices) != REFRESH_BITS:
+            raise ValueError("grouped scalar selector inventory mismatch")
+        selector_vector = polyvec_t(scalar_ring, REFRESH_BITS)
+        selector_vector.values[:] = np.concatenate([vectors[i].values for i in selector_indices])
+        keep = [i for i in range(len(vectors)) if i not in selector_indices]
+        vectors = [selector_vector]+[vectors[i] for i in keep]
+        norms = [0]+[norms[i] for i in keep]
+        vector_refs = [[refs[i] for i in selector_indices]]+[[refs[i]] for i in keep]
+    if linear_group_size != 1:
+        if not native_arrays or linear_group_size < 2:
+            raise ValueError("linear grouping requires the native array assembler")
+        # Only quotient/carry vectors occur exclusively in linear relations.
+        # Use a FIXED grouping and the original SINGLE-vector norm budget,
+        # not its sum: each component therefore retains its old norm bound.
+        # Reject inputs that do not fit this stronger group predicate.
+        import numpy as np
+        pending, new_vectors, new_norms, new_refs = [], [], [], []
+        def flush():
+            if not pending:
+                return
+            indices = pending[:]
+            pending.clear()
+            values = np.concatenate([vectors[i].values for i in indices])
+            budget = min(norms[i] for i in indices)
+            if sum(int(v)*int(v) for v in values.flat) > budget:
+                raise ValueError("fixed quotient/carry group exceeds original norm budget")
+            vector = polyvec_t(ring, len(indices))
+            vector.values[:] = values
+            new_vectors.append(vector)
+            new_norms.append(budget)
+            new_refs.append([refs[i] for i in indices])
+        previous_key = None
+        for i, ref in enumerate(refs):
+            eligible = len(ref) == 4 and isinstance(ref[0], int) and ref[1] in ("q", "c")
+            key = (ref[0], ref[1]) if eligible else None
+            if key != previous_key or not eligible:
+                flush()
+            if eligible:
+                pending.append(i)
+                if len(pending) == linear_group_size:
+                    flush()
+            else:
+                new_vectors.append(vectors[i])
+                new_norms.append(norms[i])
+                new_refs.append([ref])
+            previous_key = key
+        flush()
+        vectors, norms, vector_refs = new_vectors, new_norms, new_refs
     ref_to_index = {}
-    statement = proof_statement(
-        [vector.ring.deg for vector in vectors], [vector.dim for vector in vectors], norms,
-        num_constraints=sum(bridge.equation_count() for bridge in bridges) + len(bridges) +
-        REFRESH_BITS + len(extra_quadratics) + len(extra_linear),
-        primesize="38", num_int_constraints=len(extra_integers),
-        num_deg0_constraints=REFRESH_BITS + len(extra_deg0), zk=True)
-    for vector, ref in zip(vectors, refs):
+    selector_grouped = any((0, "w", 0, 0) in group and len(group) > 1
+                           for group in vector_refs)
+    profile = ([v.ring.deg for v in vectors], [v.dim for v in vectors], norms,
+               scalar_refresh, group_refresh,
+               tuple(tuple(group) for group in vector_refs), tuple(extra_deg0),
+               tuple((tuple(item["coefficients"]), tuple(item["refs"]),
+                      int(item.get("target", 0))) for item in extra_integers))
+    resident = resident_statement is not None
+    if resident:
+        if not native_arrays or profile != resident_statement.array_profile:
+            raise ValueError("resident norm/dimension/integer profile changed; rebuild required")
+        statement = resident_statement
+        statement.cur_witness_num = statement.witness_polys = 0
+        statement.cur_constraint_num = statement.cur_deg0_constraint_num = 0
+        statement.cur_int_constraint_num = 0
+    else:
+        statement = proof_statement(
+            [vector.ring.deg for vector in vectors], [vector.dim for vector in vectors], norms,
+            num_constraints=sum(bridge.equation_count() *
+                                (degree//256 if scalar_refresh and i < refresh_count else 1)
+                                for i, bridge in enumerate(bridges)) + len(bridges) +
+            (0 if selector_grouped else REFRESH_BITS) + len(extra_quadratics) + len(extra_linear),
+            primesize="38", num_int_constraints=len(extra_integers),
+            num_deg0_constraints=REFRESH_BITS + len(extra_deg0), zk=True)
+    if native_arrays:
+        statement.array_profile = profile
+        install_array_assembler(statement, resident=resident)
+    for vector, component_refs in zip(vectors, vector_refs):
         # append_witness returns the caller-visible index before permutation.
-        ref_to_index[ref] = statement.append_witness(vector)
+        index = statement.append_witness(vector)
+        for offset, ref in enumerate(component_refs):
+            ref_to_index[ref], offsets[ref] = index, offset
     ref_to_index.update({ref: ref_to_index[target]
                          for ref, target in aliases.items()})
+    offsets.update({ref: offsets[target] for ref, target in aliases.items()})
+    # Integer bindings are static and precede the rebindable Rq interval.
+    # This makes the saved prefix include their exact original hash chain.
+    for item in extra_integers:
+        if resident:
+            statement.cur_int_constraint_num += 1
+        else:
+            coefficients = item["coefficients"]
+            if vector_groups:
+                expanded, cursor = [], 0
+                for ref in item["refs"]:
+                    original_degree, original_dim = original_shapes[ref]
+                    size = original_degree*original_dim
+                    idx = ref_to_index[ref]
+                    dim = statement.num_pols_list[statement.map[idx]]
+                    part = [0]*(original_degree*dim)
+                    start = offsets[ref]*original_degree
+                    part[start:start+size] = coefficients[cursor:cursor+size]
+                    expanded.extend(part)
+                    cursor += size
+                if cursor != len(coefficients):
+                    raise ValueError("grouped integer binding coefficient shape mismatch")
+                coefficients = expanded
+            statement.append_integer_statement(
+                coefficients, [ref_to_index[ref] for ref in item["refs"]],
+                int(item.get("target", 0)))
     from math import isqrt
     def ceil_sqrt(value):
         root = isqrt(value)
         return root + (root*root != value)
     radius = {ref: ceil_sqrt(norm if norm else degree)
-              for ref, norm in zip(refs, norms)}
+              for ref, norm in zip(refs, original_norms)}
     radius.update({ref: radius[target] for ref, target in aliases.items()})
     max_bridge_bound = 0
     zero = poly_t(ring, [0] * degree)
@@ -1213,6 +1368,23 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
         if value not in scalar_polys:
             scalar_polys[value] = poly_t(ring, [value]+[0]*(degree-1))
         return scalar_polys[value]
+    dimensions = {ref: vector.dim for vector, group in zip(vectors, vector_refs)
+                  for ref in group}
+    dimensions.update({ref: dimensions[target] for ref, target in aliases.items()})
+    def coefficient_for_ref(values, ref, coefficient_ring):
+        if dimensions[ref] == 1:
+            return poly_t(coefficient_ring, values if native_arrays else list(values))
+        pv = polyvec_t(coefficient_ring, dimensions[ref])
+        pv.values.fill(0)
+        pv[offsets[ref]] = poly_t(coefficient_ring, values)
+        return pv
+    def scalar_for_ref(value, ref):
+        if dimensions[ref] == 1:
+            return scalar_poly(value)
+        pv = polyvec_t(ring, dimensions[ref])
+        pv.values.fill(0)
+        pv[offsets[ref]] = scalar_poly(value)
+        return pv
     for block, bridge in enumerate(bridges):
         columns = len(bridge.w_digits)
         for layer in range(bridge.equation_count()):
@@ -1229,37 +1401,65 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
                     block_values = [bridge.h_digits[index][public_layer]
                                     for index in range(start, end)]
                     value = block_values[0]  # singleton columns checked above
-                    if not any(value):
+                    if native_arrays:
+                        array = np.asarray(value, dtype=np.int64)
+                        # These are public radix digits, so the int64 dot is
+                        # exact (degree * (base-1)^2 < 2^63), unlike a dot of
+                        # the original 88-bit public coefficients.
+                        if (degree*(bridge.base-1)**2 >= 1 << 63 or
+                            int(array.min()) < 0 or int(array.max()) >= bridge.base):
+                            raise ValueError("public radix dot exceeds int64 budget")
+                        nonzero = bool(np.any(array))
+                        scalar = not np.any(array[1:])
+                        public_radius = ceil_sqrt(int(np.dot(array, array)))
+                    else:
+                        nonzero, scalar = any(value), not any(value[1:])
+                        public_radius = ceil_sqrt(sum(v*v for v in value))
+                    if not nonzero:
                         continue
-                    if not any(value[1:]):
+                    if scalar:
                         terms.append(scalar_poly(value[0]))
                     else:
-                        terms.append(poly_t(ring, list(value)))
+                        terms.append(poly_t(ring, array if native_arrays else list(value)))
                     ref = (block, "w", witness_layer, start)
+                    if vector_groups and not (block < refresh_count and start < REFRESH_BITS):
+                        terms[-1] = coefficient_for_ref(value, ref, ring)
+                    if selector_grouped and block < refresh_count and start < REFRESH_BITS:
+                        # Keep the public coefficient singleton until phase
+                        # expansion, which merges terms of this shared vector.
+                        terms[-1] = poly_t(ring, list(value))
+                        terms[-1].selector_offset = offsets[ref]
                     witnesses.append(ref_to_index[ref])
-                    coefficient_bound += sum(ceil_sqrt(sum(v*v for v in p))
-                                             for p in block_values) * radius[ref]
+                    coefficient_bound += public_radius * radius[ref]
             for q_layer, modulus_digit in enumerate(bridge.q_digits):
                 q_index = layer - q_layer
                 if 0 <= q_index < len(bridge.quotient_digits):
-                    terms.append(scalar_poly(-modulus_digit))
-                    witnesses.append(ref_to_index[(block, "q", q_index, 0)])
+                    ref = (block, "q", q_index, 0)
+                    terms.append(scalar_for_ref(-modulus_digit, ref))
+                    witnesses.append(ref_to_index[ref])
                     coefficient_bound += abs(modulus_digit) * radius[(block, "q", q_index, 0)]
             if layer:
                 for digit in range(len(carry_layers[block][layer - 1])):
-                    terms.append(scalar_poly(bridge.base ** digit))
-                    witnesses.append(ref_to_index[(block, "c", layer - 1, digit)])
+                    ref = (block, "c", layer - 1, digit)
+                    terms.append(scalar_for_ref(bridge.base ** digit, ref))
+                    witnesses.append(ref_to_index[ref])
                     coefficient_bound += bridge.base**digit * radius[(block, "c", layer-1, digit)]
             for digit in range(len(carry_layers[block][layer])):
-                terms.append(scalar_poly(-(bridge.base ** (digit + 1))))
-                witnesses.append(ref_to_index[(block, "c", layer, digit)])
+                ref = (block, "c", layer, digit)
+                terms.append(scalar_for_ref(-(bridge.base ** (digit + 1)), ref))
+                witnesses.append(ref_to_index[ref])
                 coefficient_bound += bridge.base**(digit+1) * radius[(block, "c", layer, digit)]
             rhs = bridge.target_digits[layer] if layer < len(bridge.target_digits) else [0] * degree
             coefficient_bound += max(abs(v) for v in rhs)
             if public_radix_norms and coefficient_bound >= PACK_MODULUS:
                 raise ValueError("bridge public norm budget permits Pack-field wrap")
             max_bridge_bound = max(max_bridge_bound, coefficient_bound)
-            statement.append_statement(terms, witnesses, poly_t(ring, list(rhs)))
+            if scalar_refresh and block < refresh_count:
+                from q88_native_arrays import append_scalar_refresh
+                append_scalar_refresh(statement, terms, witnesses,
+                                      poly_t(ring, list(rhs)), scalar_ring)
+            else:
+                statement.append_statement(terms, witnesses, poly_t(ring, list(rhs)))
         # An explicit terminal carry predicate completes the integer bridge.
         last = bridge.equation_count()-1
         count = len(carry_layers[block][last])
@@ -1268,46 +1468,62 @@ def build_multi_bridge_pack_statement(bridges: Sequence[Single88Bridge], *,
         if public_radix_norms and terminal_bound >= PACK_MODULUS:
             raise ValueError("terminal carry predicate permits Pack-field wrap")
         statement.append_statement(
-            [scalar_poly(bridge.base**digit) for digit in range(count)],
+            [scalar_for_ref(bridge.base**digit, (block, "c", last, digit))
+             for digit in range(count)],
             [ref_to_index[(block, "c", last, digit)] for digit in range(count)], zero)
     statement.bridge_coefficient_bound = max_bridge_bound
     # Shared selector vectors are binary once; aliases already force every
     # refresh block to use the same witness allocation.
-    for bit in range(REFRESH_BITS):
+    explicit_selectors = bool(vector_groups and dimensions[(0, "w", 0, 0)] > 1)
+    if group_refresh or explicit_selectors:
+        if not resident:
+            error = lib.labrador38_py_append_deg0_vector_constraints(
+                statement.statement, statement.map[ref_to_index[(0, "w", 0, 0)]], REFRESH_BITS)
+            if error:
+                raise ValueError(f"grouped scalar selector degree-zero failed: {error}")
+        statement.cur_deg0_constraint_num += REFRESH_BITS
+    for bit in range(0 if group_refresh or explicit_selectors else REFRESH_BITS):
         current = ref_to_index[(0, "w", 0, bit)]
-        statement.append_deg0_statement(current)
+        if resident:
+            statement.cur_deg0_constraint_num += 1
+        else:
+            statement.append_deg0_statement(current)
+        bit_ring = scalar_ring if scalar_refresh else ring
         statement.append_quadratic_statement(
-            [poly_t(ring, [-1] + [0] * (degree - 1))], [current], [1],
-            [current], [current], zero)
+            [poly_t(bit_ring, [-1] + [0] * (bit_ring.deg - 1))], [current], [1],
+            [current], [current], poly_t(bit_ring, [0]*bit_ring.deg))
     for item in extra_quadratics:
         linear = item.get("linear", ())
         quadratic = item.get("quadratic", ())
         statement.append_quadratic_statement(
-            [poly_t(ring, list(coeff)) for coeff, _ in linear],
+            [coefficient_for_ref(coeff, ref, ring) for coeff, ref in linear],
             [ref_to_index[ref] for _, ref in linear],
             [int(coeff) for coeff, _, _ in quadratic],
             [ref_to_index[left] for _, left, _ in quadratic],
             [ref_to_index[right] for _, _, right in quadratic], zero)
     extra_degrees = {item["ref"]: int(item.get("degree", degree))
                      for item in extra_witness}
+    seen_deg0 = set()
     for ref in extra_deg0:
         idx = ref_to_index[ref]
-        error = lib.labrador38_py_append_deg0_logical_vector_constraints(
-            statement.statement, statement.map[idx], 1, extra_degrees[ref] // 256)
+        if idx in seen_deg0:
+            continue
+        seen_deg0.add(idx)
+        count = dimensions[ref]
+        error = 0 if resident else lib.labrador38_py_append_deg0_logical_vector_constraints(
+            statement.statement, statement.map[idx], count, extra_degrees[ref] // 256)
         if error:
             raise ValueError(f"joint extra degree-zero constraint failed: {error}")
-        statement.cur_deg0_constraint_num += 1
+        statement.cur_deg0_constraint_num += count
     for item in extra_linear:
         n = int(item.get("degree", degree))
         r = ring if n == degree else polyring_t(n, PACK_MODULUS)
         statement.append_statement(
-            [poly_t(r, list(c)) for c, _ in item["linear"]],
+            [coefficient_for_ref(c, ref, r) for c, ref in item["linear"]],
             [ref_to_index[ref] for _, ref in item["linear"]],
             poly_t(r, list(item["target"])))
-    for item in extra_integers:
-        statement.append_integer_statement(
-            item["coefficients"], [ref_to_index[ref] for ref in item["refs"]],
-            int(item.get("target", 0)))
+    if native_arrays:
+        statement.finish_array_assembly()
     if (statement.cur_constraint_num != statement.num_constraints or
         statement.cur_deg0_constraint_num != statement.num_deg0_constraints or
         statement.cur_int_constraint_num != statement.num_int_constraints):
