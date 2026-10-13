@@ -22,34 +22,7 @@ from revac_acc96_wire import (PROVER_BYTES, LinkPayload, ProverPayload,
                               LINK_DECOMP_BASE, LINK_DECOMP_LIMBS)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--public", default="/tmp/q88bridge_real/public.bin")
-    parser.add_argument("--prover-link", default="/tmp/q88bridge_real/prover_link.bin")
-    # 16 is the smallest tested grouping that reduced Pack reducer work while
-    # keeping the exact norm gate and both serialized verification checks.
-    parser.add_argument("--group-size", type=int, default=16)
-    parser.add_argument("--handle-bound", action="store_true",
-                        help="bind handle bits and product witnesses in Pack")
-    args = parser.parse_args()
-    verify_modulus_certificate()
-    public = PublicParameters.decode(Path(args.public).read_bytes())
-    raw = Path(args.prover_link).read_bytes()
-    prover = ProverPayload(raw[:PROVER_BYTES])
-    link = LinkPayload.decode(raw[PROVER_BYTES:])
-    link.audit_relation(prover.handle_vector)
-    started = time.perf_counter()
-    if args.handle_bound:
-        matrix, witness, handle_meta = build_single88_handle_bound_relation(
-            public, prover, modulus=SINGLE88_PRIME)
-    else:
-        matrix, witness = build_single88_effective_relation(
-            public, prover, modulus=SINGLE88_PRIME)
-        handle_meta = None
-    bridge = compile_single88_bridge_fast(
-        matrix, witness, base=128, witness_digits=9, quotient_digits=16)
-    bridge_seconds = time.perf_counter() - started
-    statement_started = time.perf_counter()
+def single88_binding_constraints(witness, handle_meta, link):
     extra_witness = []
     extra_quadratics = []
     extra_deg0 = []
@@ -150,6 +123,39 @@ def main() -> None:
             target = tuple(q19_center(v) for v in link.commitment[row])
             extra_linear.append({"degree": Q19_N, "linear": linear,
                                  "target": target})
+    return extra_witness, extra_quadratics, extra_deg0, extra_linear, extra_integers
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--public", default="/tmp/q88bridge_real/public.bin")
+    parser.add_argument("--prover-link", default="/tmp/q88bridge_real/prover_link.bin")
+    # 16 is the smallest tested grouping that reduced Pack reducer work while
+    # keeping the exact norm gate and both serialized verification checks.
+    parser.add_argument("--group-size", type=int, default=16)
+    parser.add_argument("--handle-bound", action="store_true",
+                        help="bind handle bits and product witnesses in Pack")
+    args = parser.parse_args()
+    verify_modulus_certificate()
+    public = PublicParameters.decode(Path(args.public).read_bytes())
+    raw = Path(args.prover_link).read_bytes()
+    prover = ProverPayload(raw[:PROVER_BYTES])
+    link = LinkPayload.decode(raw[PROVER_BYTES:])
+    link.audit_relation(prover.handle_vector)
+    started = time.perf_counter()
+    if args.handle_bound:
+        matrix, witness, handle_meta = build_single88_handle_bound_relation(
+            public, prover, modulus=SINGLE88_PRIME)
+    else:
+        matrix, witness = build_single88_effective_relation(
+            public, prover, modulus=SINGLE88_PRIME)
+        handle_meta = None
+    bridge = compile_single88_bridge_fast(
+        matrix, witness, base=128, witness_digits=9, quotient_digits=16)
+    bridge_seconds = time.perf_counter() - started
+    statement_started = time.perf_counter()
+    (extra_witness, extra_quadratics, extra_deg0, extra_linear,
+     extra_integers) = single88_binding_constraints(witness, handle_meta, link)
     statement, _ = build_grouped_pack_statement(
         bridge, group_size=(1 if handle_meta is not None else args.group_size),
         extra_witness=extra_witness, extra_quadratics=extra_quadratics,

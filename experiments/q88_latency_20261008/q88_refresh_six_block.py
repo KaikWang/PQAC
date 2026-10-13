@@ -2,6 +2,7 @@
 """Six-block refresh selector proof in one native Pack statement."""
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 import time
 
@@ -19,7 +20,7 @@ def center(value):
     return value - SINGLE88_PRIME if value > SINGLE88_PRIME // 2 else value
 
 
-def make_bridge(public, prover, block):
+def make_bridge(public, prover, block, *, compact=True):
     n = len(prover.witness_poly(0))
     rows = [public.refresh(index, block) for index in range(REFRESH_BITS + 1)]
     raw = [int(v) for v in rows[0]]
@@ -41,30 +42,49 @@ def make_bridge(public, prover, block):
     witness = [
         tuple([int(bit)] + [0] * (n - 1))
         for bit in prover.refresh_r_bits
-    ] + [tuple(layer) for layer in ahat] + [tuple(lift)]
+    ] + [tuple(layer) for layer in ahat]
     matrix = [tuple(int(v) % SINGLE88_PRIME for v in rows[index + 1])
               for index in range(REFRESH_BITS)]
     matrix += [tuple((-(BASE ** digit)) % SINGLE88_PRIME if i == 0 else 0
                      for i in range(n)) for digit in range(13)]
-    matrix.append(tuple((-SINGLE88_PRIME) % SINGLE88_PRIME
-                        if i == 0 else 0 for i in range(n)))
+    if not compact:
+        # This column is zero modulo p. The explicit lift is redundant:
+        # compile_single88_bridge_fast already creates the exact p quotient.
+        witness.append(tuple(lift))
+        matrix.append(tuple(0 for _ in range(n)))
     target = tuple((-int(v)) % SINGLE88_PRIME for v in rows[0])
     return compile_single88_bridge_fast(
         matrix, witness, target=target, base=BASE,
-        witness_digits=9, quotient_digits=16)
+        witness_digits=(1 if compact else 9),
+        quotient_digits=(3 if compact else 16))
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--legacy-layout", action="store_true",
+                        help="retain the previous 9/16-layer comparison layout")
+    parser.add_argument("--bind-products", action="store_true",
+                        help="bind all 78 refresh-digit times z products")
+    args = parser.parse_args()
+    if args.legacy_layout and args.bind_products:
+        parser.error("product binding requires the compact layout")
     verify_modulus_certificate()
     public = PublicParameters.decode(Path("/tmp/q88bridge_real/public.bin").read_bytes())
     raw = Path("/tmp/q88bridge_real/prover_link.bin").read_bytes()
     prover = ProverPayload(raw[:PROVER_BYTES])
     started = time.perf_counter()
-    bridges = [make_bridge(public, prover, block)
+    bridges = [make_bridge(public, prover, block,
+                           compact=not args.legacy_layout)
                for block in range(REFRESH_BLOCKS)]
     bridge_seconds = time.perf_counter() - started
     statement_started = time.perf_counter()
-    statement, _ = build_multi_bridge_pack_statement(bridges, group_size=1)
+    extra_witness, extra_quadratics = [], []
+    if args.bind_products:
+        from q88_refresh_products import refresh_product_constraints
+        extra_witness, extra_quadratics = refresh_product_constraints(bridges, prover)
+    statement, _ = build_multi_bridge_pack_statement(
+        bridges, group_size=1, public_radix_norms=args.bind_products,
+        extra_witness=extra_witness, extra_quadratics=extra_quadratics)
     statement_seconds = time.perf_counter() - statement_started
     from labrados import ffi, lib, pack_verify
     prove_started = time.perf_counter()
@@ -86,6 +106,8 @@ def main():
     if not pack_verify((params, decoded), statement.output_statement(), "38"):
         raise RuntimeError("six-block refresh reload Verify failed")
     print(f"refresh_blocks={REFRESH_BLOCKS} selectors={REFRESH_BITS} modulus={SINGLE88_PRIME}")
+    print(f"layout={'legacy' if args.legacy_layout else 'compact'}")
+    print(f"refresh_product_binding={args.bind_products}")
     print(f"native_witness_vectors={statement.num_witness_vectors} "
           f"constraints={statement.num_constraints} "
           f"deg0_constraints={statement.num_deg0_constraints}")
