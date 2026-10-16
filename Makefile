@@ -222,6 +222,7 @@ LABRADOR_LIBS = -fopenmp -lmvec -lm
 
 LABRADOR_DIR = src/labrados
 LABRADOR_INC = \
+	$(LABRADOR_DIR)/scratch_pool.h \
 	$(LABRADOR_DIR)/aesctr.h \
 	$(LABRADOR_DIR)/comkey.h \
 	$(LABRADOR_DIR)/constraints.h\
