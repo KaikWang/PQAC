@@ -2,8 +2,8 @@
 """Persistent same-device worker for the q88 MemVer + same-handle proof.
 
 The default degree-4096 compiler builds 18 Remark-4.3 selection equalities,
-six rank-16/rank-8 aggregation equalities, three accumulator relations and four
-same-handle relations.  ``REVAC_Q96_FULL_RING=0`` selects the former phased
+six rank-16/rank-8 aggregation equalities, three accumulator relations, four
+same-handle relations and six scaled-refresh-Z bindings in compact v3.  ``REVAC_Q96_FULL_RING=0`` selects the former phased
 288/96/48 layout.  A full prove request installs the private witness; later
 requests bound to the identical PP ID, sequence, handle and accumulator reuse
 it while replacing the fresh same-handle opening.  The Unix socket is local
@@ -16,6 +16,7 @@ import argparse
 import contextlib
 import hashlib
 import os
+
 import pathlib
 import signal
 import socket
@@ -23,6 +24,9 @@ import struct
 import time
 from collections import OrderedDict
 from typing import Any
+
+from revac_q88_profile import configure as _configure_q88_profile
+_configure_q88_profile()
 
 # Configure libgomp before importing the LaZer CFFI module.  Managed
 # containers occasionally export the invalid value ``OMP_NUM_THREADS=0``;
@@ -231,6 +235,28 @@ def _bind_deployment_profile(entry: dict[str, Any], context_hash: bytes,
         compiler_layout = b"rank16x8-aggregate-refresh128-sparse-v5-compact-hash"
     else:
         compiler_layout = b"direct-quadratics-refresh128-sparse-v5-compact-hash"
+    ordering = os.environ.get("REVAC_Q88_APPROX_ORDER", "baseline")
+    if ordering != "baseline":
+        compiler_layout += b"-approx-order-" + ordering.encode("ascii")
+    norm_group_size = int(os.environ.get("REVAC_Q88_NORM_GROUP_SIZE", "1"))
+    if norm_group_size != 1:
+        compiler_layout += b"-original-witness-norm-group-v3-" + str(norm_group_size).encode("ascii")
+    if os.environ.get("REVAC_Q88_TIGHT_WITNESS_TOP", "0") != "0":
+        compiler_layout += b"-public-window-top-digit-v1"
+    if os.environ.get("REVAC_Q88_DCH_COST", "0") != "0":
+        compiler_layout += b"-dch-public-work-cost-v1"
+    if os.environ.get("REVAC_Q88_SCALAR_HANDLE_NORM", "0") != "0":
+        compiler_layout += b"-scalar-handle-exact-norm-v1"
+    if os.environ.get("REVAC_Q88_TIGHT_REFRESH_NORM", "0") != "0":
+        compiler_layout += b"-refresh-public-top-digit-v1"
+    if "REVAC_Q88_AGGREGATE_RADIX" in os.environ:
+        compiler_layout += b"-aux-radix-" + os.environ["REVAC_Q88_AGGREGATE_RADIX"].encode("ascii")
+    if os.environ.get("REVAC_Q88_PRESERVE_AUX_REQUIREMENT", "0") != "0":
+        compiler_layout += b"-preserve-aux-requirement-v1"
+    if os.environ.get("REVAC_Q88_AUX_TOP_UNBALANCED", "0") != "0":
+        compiler_layout += b"-bounded-unsaturated-aux-top-v1"
+    if os.environ.get("REVAC_Q88_SCALED_REFRESH_Z", "0") != "0":
+        compiler_layout += b"-scaled-refresh-z-binding-v1"
     static_profile_id = hashlib.shake_256(
         b"REVAC-Q88-LABRADOR38-STATIC-PROFILE-V2\x00" +
         compiler_layout + b"\x00" +
@@ -441,6 +467,8 @@ def prepare_prover(dynamic: bytes, entry: dict[str, Any]) -> bool:
         prover.sequence, link.accumulator_digest)
     cache: Q96StatementCache = entry["prove_statement"]
     verifier_cache: Q96StatementCache = entry["verify_statement"]
+    if cache.centered_public_bank is None:
+        cache.centered_public_bank = verifier_cache.centered_public_bank
     if cache.refresh_bank is None and verifier_cache.refresh_bank is not None:
         cache.refresh_bank = verifier_cache.refresh_bank
     cache_hit = cache.ps is not None
@@ -448,6 +476,11 @@ def prepare_prover(dynamic: bytes, entry: dict[str, Any]) -> bool:
     build_statement(
         entry["public"], prover, link, False, check_witness=False,
         cache=cache, prepare_prover=True)
+    if os.environ.get("REVAC_Q88_PREPARE_AUDIT", "0") == "1":
+        ps = cache.ps
+        if ps is None or int(ps.simple_verify(ps.statement, ps.witness)) != 1:
+            raise ValueError("q88 prepared resident witness relation failed")
+        print("Q88_PREPARE_CLEAR_VERIFY_PASS", flush=True)
     entry["last_prover"] = prover
     print(f"[q96 worker timing] prover statement prewarm: "
           f"{time.perf_counter() - started:.6f} s", flush=True)
@@ -464,6 +497,8 @@ def prepare_verifier(dynamic: bytes, entry: dict[str, Any]) -> bool:
         instance.window_id, instance.sequence, instance.accumulator_digest)
     cache: Q96StatementCache = entry["verify_statement"]
     prover_cache: Q96StatementCache = entry["prove_statement"]
+    if cache.centered_public_bank is None:
+        cache.centered_public_bank = prover_cache.centered_public_bank
     if cache.refresh_bank is None and prover_cache.refresh_bank is not None:
         # The seed-expanded Remark-4.3 matrix bank is immutable and depends
         # only on the PP.  Sharing it avoids repeating the dominant cold-start

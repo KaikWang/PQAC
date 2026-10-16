@@ -64,6 +64,7 @@ int acc96_add(acc96_accumulator_t *state,
   memset(witness, 0, sizeof(*witness));
   if (!sampler(witness, &state->pp, &state->trapdoor,
                &state->accumulator, handle, sampler_opaque, ctx) ||
+      !acc96_relation_fresh_witness_check(witness, ctx) ||
       !acc96_relation_memver(&state->pp, &state->accumulator, handle,
                              witness, public_norm_sq_bound, ctx)) {
     memset(witness, 0, sizeof(*witness));

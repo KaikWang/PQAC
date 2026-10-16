@@ -168,6 +168,7 @@ class Q96StatementCache:
         # Canonical lane/phase expansion of the 129 x 6 seeded Remark-4.3
         # matrix bank.  Shape: matrix, lane, phase, block, coefficient.
         self.refresh_bank: Any | None = None
+        self.centered_public_bank: Any | None = None
 
     def checked_params(self, require_zk: bool = True) -> Any:
         from lazer import lib
@@ -388,7 +389,7 @@ def _balanced_radix_limbs(values: Any, limbs: int,
     return out
 
 
-def _refresh_lane_phase_bank(public: PublicParameters) -> Any:
+def _refresh_lane_phase_bank_reference(public: PublicParameters) -> Any:
     """Expand the seeded q88 A_i bank once into the three CRT phase views."""
     if _np is None:
         raise ValueError("q88 randomized refresh requires NumPy")
@@ -404,6 +405,64 @@ def _refresh_lane_phase_bank(public: PublicParameters) -> Any:
                     dtype=_np.int64, count=N)
                 bank[matrix, lane, :, block, :] = _np.transpose(
                     values.reshape(PHASE_N, PHASES))
+    return bank
+
+
+def _uniform_poly_crt_lanes(seed: bytes, domain: int, first: int, second: int,
+                            *, centered: bool = False) -> Any:
+    """Same SHAKE/rejection stream as _uniform_poly; exact uint64 CRT views.
+
+    88-bit candidates split into 32/32/24-bit words. Rejection is lexicographic
+    against the original q88 modulus. Products are below 2**62; no truncation.
+    """
+    import struct
+    from revac_acc96_wire import COEFF_BYTES, Q96
+    if COEFF_BYTES != 11 or Q96.bit_length() != 88:
+        raise ValueError("batched public expansion requires the original q88 encoding")
+    absorbed = seed + struct.pack("<III", domain, first, second)
+    length = COEFF_BYTES * (N + 16)
+    qwords = (Q96 & 0xffffffff, (Q96 >> 32) & 0xffffffff, Q96 >> 64)
+    while True:
+        stream = hashlib.shake_256(absorbed).digest(length)
+        raw = _np.frombuffer(stream[:len(stream)//11*11], dtype=_np.uint8).reshape(-1,11)
+        words = []
+        for start, count in ((0,4),(4,4),(8,3)):
+            word = _np.zeros(len(raw), dtype=_np.uint64)
+            for byte in range(count):
+                word |= raw[:,start+byte].astype(_np.uint64) << (8*byte)
+            words.append(word)
+        low, middle, high = words
+        keep = ((high < qwords[2]) | ((high == qwords[2]) &
+                ((middle < qwords[1]) | ((middle == qwords[1]) & (low < qwords[0])))))
+        if _np.count_nonzero(keep) >= N:
+            low, middle, high = (word[keep][:N] for word in words)
+            lanes = []
+            for modulus in MODULI:
+                residue = ((low % modulus) +
+                    (middle * ((1 << 32) % modulus)) % modulus +
+                    (high * ((1 << 64) % modulus)) % modulus) % modulus
+                residue = residue.astype(_np.int64)
+                if centered:
+                    residue = _np.where(residue > modulus//2, residue-modulus, residue)
+                lanes.append(residue)
+            return _np.stack(lanes)
+        length *= 2
+
+
+def _refresh_lane_phase_bank(public: PublicParameters) -> Any:
+    """Expand public coefficients in batches, preserving every original byte."""
+    bank = _np.empty((REFRESH_BITS+1, LANES, PHASES, REFRESH_BLOCKS, PHASE_N),
+                     dtype=_np.int64)
+    seed = hashlib.shake_256(b"REVAC-Q88-REMARK-4.3-v1" + public.seed).digest(32)
+    for matrix in range(REFRESH_BITS+1):
+        for block in range(REFRESH_BLOCKS):
+            lanes = _uniform_poly_crt_lanes(seed, 0x52383841, matrix, block)
+            bank[matrix,:,:,block,:] = lanes.reshape(LANES,PHASE_N,PHASES).transpose(0,2,1)
+    if os.environ.get("REVAC_Q88_PUBLIC_BANK_AUDIT", "0") != "0":
+        if not _np.array_equal(bank, _refresh_lane_phase_bank_reference(public)):
+            raise ValueError("batched public refresh bank differs from original expansion")
+        print("PUBLIC_REFRESH_BANK_REFERENCE_PASS", flush=True)
+    bank.flags.writeable = False
     return bank
 
 
@@ -627,7 +686,8 @@ def build_statement(public: PublicParameters, prover: Any,
         return build_statement_full_ring(
             public, prover, link, prove, constraint_filter,
             fold_handle_for_debug, check_witness, cache,
-            reuse_accumulator_witness, prepare_prover)
+            reuse_accumulator_witness=reuse_accumulator_witness,
+            prepare_prover=prepare_prover)
 
     build_started = time.perf_counter()
     compact_hash = os.environ.get(
@@ -698,7 +758,7 @@ def build_statement(public: PublicParameters, prover: Any,
     # 0.45--0.55 s per show and cannot affect verification.  Rebind only the
     # public accumulator/link RHS transcript in this fast path.
     if (cache is not None and cache.ps is not None and not prove and
-            not check_witness):
+            not check_witness and not prepare_prover):
         ps = cache.ps
         started = time.perf_counter()
         accumulator_constraints = (1 if constraint_filter is not None

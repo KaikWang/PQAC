@@ -1,0 +1,216 @@
+{
+  "profile": "production q88 compact CRT v3",
+  "independent_runs": 3,
+  "includes_fresh_setup_issue_revoke_update": true,
+  "full_test_wall_includes_negative_checks_and_extra_sync_tests": true,
+  "remote_sync_uses_local_authenticated_callback_not_network_latency": true,
+  "runs": [
+    {
+      "run": "run1",
+      "seconds": {
+        "runtime_initialization": 0.001668371,
+        "ta_setup": 4.223262943,
+        "keygen_3uav_1gcs_and_test_identity_selection": 0.014538825,
+        "registration_3uav_1gcs": 0.000114523,
+        "issue_uav1": 3.301515497,
+        "issue_uav2": 3.3617642,
+        "issue_uav_local": 3.3124879,
+        "prover_prewarm": 3.10546162,
+        "verifier_prewarm": 1.447998278,
+        "ta_tail4_prefetch": 0.483839668,
+        "uav_tail4_prefetch_auth_cache": 0.005131274,
+        "ta_delete_delta6_and_compatible_tail4": 1.185997866,
+        "ta_update_manifest_export": 0.000141494,
+        "uncached_local_update_with_clear_verify": 1.35555058,
+        "uav_delta6_update": 0.037007459,
+        "post_update_show_generation_including_serialization": 4.261075675,
+        "post_update_show_wire_verification": 1.796715111,
+        "ta_memwitsync_export": 3.383105353,
+        "memwitsync_recovery_with_clear_checks": 4.496897504,
+        "full_test_wall_including_checks_and_cleanup": 45.258559689,
+        "issue_three_credentials_total": 9.975767597,
+        "initial_show_generation_including_serialization": 3.076180696,
+        "initial_show_wire_verification": 1.88439662
+      },
+      "initial_packet_bytes": 217257,
+      "updated_packet_bytes": 217348
+    },
+    {
+      "run": "run2",
+      "seconds": {
+        "runtime_initialization": 0.001648009,
+        "ta_setup": 4.036635041,
+        "keygen_3uav_1gcs_and_test_identity_selection": 0.015168637,
+        "registration_3uav_1gcs": 0.000108436,
+        "issue_uav1": 3.250217915,
+        "issue_uav2": 3.242201544,
+        "issue_uav_local": 3.198845297,
+        "prover_prewarm": 2.897068702,
+        "verifier_prewarm": 1.410874173,
+        "ta_tail4_prefetch": 0.533927388,
+        "uav_tail4_prefetch_auth_cache": 0.006174304,
+        "ta_delete_delta6_and_compatible_tail4": 1.235189408,
+        "ta_update_manifest_export": 7.8075e-05,
+        "uncached_local_update_with_clear_verify": 1.292699255,
+        "uav_delta6_update": 0.035920836,
+        "post_update_show_generation_including_serialization": 4.201962061,
+        "post_update_show_wire_verification": 1.884779327,
+        "ta_memwitsync_export": 3.464791767,
+        "memwitsync_recovery_with_clear_checks": 4.579256572,
+        "full_test_wall_including_checks_and_cleanup": 45.474371269,
+        "issue_three_credentials_total": 9.691264755999999,
+        "initial_show_generation_including_serialization": 3.909185536,
+        "initial_show_wire_verification": 1.793671004
+      },
+      "initial_packet_bytes": 217226,
+      "updated_packet_bytes": 217218
+    },
+    {
+      "run": "run3",
+      "seconds": {
+        "runtime_initialization": 0.001465261,
+        "ta_setup": 4.014583945,
+        "keygen_3uav_1gcs_and_test_identity_selection": 0.007985413,
+        "registration_3uav_1gcs": 0.000115693,
+        "issue_uav1": 3.182596788,
+        "issue_uav2": 3.204372942,
+        "issue_uav_local": 3.133702897,
+        "prover_prewarm": 2.883364297,
+        "verifier_prewarm": 1.622699298,
+        "ta_tail4_prefetch": 0.464579634,
+        "uav_tail4_prefetch_auth_cache": 0.005579397,
+        "ta_delete_delta6_and_compatible_tail4": 1.185039252,
+        "ta_update_manifest_export": 7.5221e-05,
+        "uncached_local_update_with_clear_verify": 1.286344476,
+        "uav_delta6_update": 0.036808252,
+        "post_update_show_generation_including_serialization": 4.443236686,
+        "post_update_show_wire_verification": 1.888906524,
+        "ta_memwitsync_export": 3.397038497,
+        "memwitsync_recovery_with_clear_checks": 4.796711698,
+        "full_test_wall_including_checks_and_cleanup": 45.296092726,
+        "issue_three_credentials_total": 9.520672627,
+        "initial_show_generation_including_serialization": 3.537002116,
+        "initial_show_wire_verification": 1.798102096
+      },
+      "initial_packet_bytes": 217978,
+      "updated_packet_bytes": 217774
+    }
+  ],
+  "statistics": {
+    "runtime_initialization": {
+      "mean_seconds": 0.0015938803333333334,
+      "min_seconds": 0.001465261,
+      "max_seconds": 0.001668371
+    },
+    "ta_setup": {
+      "mean_seconds": 4.091493976333333,
+      "min_seconds": 4.014583945,
+      "max_seconds": 4.223262943
+    },
+    "keygen_3uav_1gcs_and_test_identity_selection": {
+      "mean_seconds": 0.012564291666666666,
+      "min_seconds": 0.007985413,
+      "max_seconds": 0.015168637
+    },
+    "registration_3uav_1gcs": {
+      "mean_seconds": 0.000112884,
+      "min_seconds": 0.000108436,
+      "max_seconds": 0.000115693
+    },
+    "issue_uav1": {
+      "mean_seconds": 3.2447767333333335,
+      "min_seconds": 3.182596788,
+      "max_seconds": 3.301515497
+    },
+    "issue_uav2": {
+      "mean_seconds": 3.269446228666667,
+      "min_seconds": 3.204372942,
+      "max_seconds": 3.3617642
+    },
+    "issue_uav_local": {
+      "mean_seconds": 3.2150120313333335,
+      "min_seconds": 3.133702897,
+      "max_seconds": 3.3124879
+    },
+    "prover_prewarm": {
+      "mean_seconds": 2.961964873,
+      "min_seconds": 2.883364297,
+      "max_seconds": 3.10546162
+    },
+    "verifier_prewarm": {
+      "mean_seconds": 1.4938572496666667,
+      "min_seconds": 1.410874173,
+      "max_seconds": 1.622699298
+    },
+    "ta_tail4_prefetch": {
+      "mean_seconds": 0.49411556333333334,
+      "min_seconds": 0.464579634,
+      "max_seconds": 0.533927388
+    },
+    "uav_tail4_prefetch_auth_cache": {
+      "mean_seconds": 0.005628325,
+      "min_seconds": 0.005131274,
+      "max_seconds": 0.006174304
+    },
+    "ta_delete_delta6_and_compatible_tail4": {
+      "mean_seconds": 1.2020755086666666,
+      "min_seconds": 1.185039252,
+      "max_seconds": 1.235189408
+    },
+    "ta_update_manifest_export": {
+      "mean_seconds": 9.826333333333334e-05,
+      "min_seconds": 7.5221e-05,
+      "max_seconds": 0.000141494
+    },
+    "uncached_local_update_with_clear_verify": {
+      "mean_seconds": 1.311531437,
+      "min_seconds": 1.286344476,
+      "max_seconds": 1.35555058
+    },
+    "uav_delta6_update": {
+      "mean_seconds": 0.036578849,
+      "min_seconds": 0.035920836,
+      "max_seconds": 0.037007459
+    },
+    "post_update_show_generation_including_serialization": {
+      "mean_seconds": 4.302091474,
+      "min_seconds": 4.201962061,
+      "max_seconds": 4.443236686
+    },
+    "post_update_show_wire_verification": {
+      "mean_seconds": 1.8568003206666666,
+      "min_seconds": 1.796715111,
+      "max_seconds": 1.888906524
+    },
+    "ta_memwitsync_export": {
+      "mean_seconds": 3.414978539,
+      "min_seconds": 3.383105353,
+      "max_seconds": 3.464791767
+    },
+    "memwitsync_recovery_with_clear_checks": {
+      "mean_seconds": 4.624288591333333,
+      "min_seconds": 4.496897504,
+      "max_seconds": 4.796711698
+    },
+    "full_test_wall_including_checks_and_cleanup": {
+      "mean_seconds": 45.34300789466667,
+      "min_seconds": 45.258559689,
+      "max_seconds": 45.474371269
+    },
+    "issue_three_credentials_total": {
+      "mean_seconds": 9.729234993333334,
+      "min_seconds": 9.520672627,
+      "max_seconds": 9.975767597
+    },
+    "initial_show_generation_including_serialization": {
+      "mean_seconds": 3.507456116,
+      "min_seconds": 3.076180696,
+      "max_seconds": 3.909185536
+    },
+    "initial_show_wire_verification": {
+      "mean_seconds": 1.8253899066666666,
+      "min_seconds": 1.793671004,
+      "max_seconds": 1.88439662
+    }
+  }
+}

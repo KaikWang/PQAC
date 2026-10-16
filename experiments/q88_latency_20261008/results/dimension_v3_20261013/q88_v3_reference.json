@@ -1,0 +1,37 @@
+{
+  "profile": "production CRT isolated dimension v3",
+  "norm_group_size": 16,
+  "approx_order": "limb",
+  "fixture": "/tmp/q88bridge_full",
+  "compact_witness_count": 4,
+  "compact_witness_radix": 32767,
+  "tight_witness_top": true,
+  "tight_aggregate_norm": true,
+  "dch_cost_selection": false,
+  "scalar_handle_exact_norm": true,
+  "tight_refresh_norm": true,
+  "batch_split_mode": "0",
+  "fused_ling_mode": "0",
+  "prewarm_prover_seconds": 1.9261369854211807,
+  "prewarm_verifier_seconds": 4.885359972715378,
+  "clear_verify": true,
+  "pack_reload_verify": true,
+  "negative_checks": false,
+  "measurements": [
+    {
+      "generation_seconds": 3.450357288122177,
+      "verification_seconds": 2.1261958852410316,
+      "proof_bytes": 198818
+    },
+    {
+      "generation_seconds": 3.6514253318309784,
+      "verification_seconds": 2.1314382180571556,
+      "proof_bytes": 198786
+    },
+    {
+      "generation_seconds": 4.205508045852184,
+      "verification_seconds": 2.159572049975395,
+      "proof_bytes": 198786
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "date": "2026-10-13",
+  "server": "autodl-pqa11",
+  "cpu": "Intel Xeon Gold 6430",
+  "profile": "production q88 CRT isolated accumulator norm grouping v2",
+  "norm_group_size": 4,
+  "baseline_source_modified": false,
+  "timing_scope": "warm resident full shows, prewarm excluded",
+  "repetitions": 5,
+  "prewarm_seconds": {
+    "prover": 5.913,
+    "verifier": 2.066
+  },
+  "complete_show_generation_seconds": {
+    "samples": [
+      3.853016,
+      3.433692,
+      3.178731,
+      3.353783,
+      3.958801
+    ],
+    "mean": 3.5556046,
+    "minimum": 3.178731,
+    "maximum": 3.958801
+  },
+  "complete_show_wire_verification_seconds": {
+    "samples": [
+      1.911,
+      1.867,
+      1.867,
+      1.975,
+      1.835
+    ],
+    "mean": 1.891,
+    "minimum": 1.835,
+    "maximum": 1.975
+  },
+  "accumulator_worker_generation_seconds": {
+    "samples": [
+      3.777845,
+      3.359421,
+      3.101653,
+      3.279144,
+      3.893486
+    ],
+    "mean": 3.4823098,
+    "minimum": 3.101653,
+    "maximum": 3.893486
+  },
+  "accumulator_worker_verification_seconds": {
+    "samples": [
+      1.896603,
+      1.853259,
+      1.855626,
+      1.965204,
+      1.825904
+    ],
+    "mean": 1.8793192,
+    "minimum": 1.825904,
+    "maximum": 1.965204
+  },
+  "accumulator_envelope_kib_rounded": {
+    "samples": [
+      188.34,
+      188.12,
+      188.46,
+      188.74,
+      188.77
+    ],
+    "mean": 188.48600000000002,
+    "minimum": 188.12,
+    "maximum": 188.77
+  },
+  "compressed_complete_show_packet_kib_rounded": {
+    "samples": [
+      215.46,
+      216.28,
+      212.52,
+      212.08,
+      212.14
+    ],
+    "mean": 213.696,
+    "minimum": 212.08,
+    "maximum": 216.28
+  },
+  "last_accumulator_envelope_bytes": 193305,
+  "all_five_pack_verify_passed": true,
+  "entity_integration_passed": true,
+  "all_five_complete_shows_under_4s_2s": true,
+  "norm_audit_recomposed_log2_upper_bound": 75.059,
+  "accumulator_original_norm_log2_limit": 80.0,
+  "independent_reload_verify_passed": true,
+  "baseline_profile_rejected_group4_proof": true,
+  "negative_checks": {
+    "accumulator_digest_tamper_rejected_before_pack": true,
+    "canonical_q19_link_rhs_rejected_by_pack": true,
+    "truncated_envelope_rejected": true,
+    "trailing_envelope_data_rejected": true,
+    "valid_proof_verified_after_rebind": true
+  },
+  "additional_process_verification_seconds": [
+    2.060079,
+    2.100669
+  ],
+  "timing_limitation": "Five warm full shows met 4s/2s; additional first-process/rebind checks exceeded 2s. This is not a worst-case latency guarantee."
+}

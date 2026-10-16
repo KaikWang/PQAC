@@ -16,7 +16,9 @@ void acc96_sampleleft_ctx_free(acc96_sampleleft_ctx_t *sampler);
 
 /* Production q96 SampleLeft callback.  It samples the right-hand hiding
  * vector, subtracts its public contribution, applies the certified
- * perturbation distribution and finishes with exact-rational Klein. */
+ * perturbation distribution and finishes with exact-rational Klein. Success
+ * also requires acc96_relation_fresh_witness_check; on any failure out is
+ * cleared. There is no implicit retry or coefficient clipping. */
 int acc96_sampleleft_secure(acc96_relation_witness_t *out,
                             const acc96_relation_pp_t *pp,
                             const acc96_trapdoor_t *trapdoor,

@@ -1,0 +1,183 @@
+{
+  "profile": "production complete q88 CRT compact v3",
+  "server": "autodl-pqa11",
+  "generation_includes_serialization": true,
+  "excludes_initialization_issue_and_revocation": true,
+  "measurements": [
+    {
+      "run": 1,
+      "generation_seconds": 3.160039626,
+      "verification_seconds": 1.823231906,
+      "serialization_seconds": 0.0321768,
+      "accumulator_bytes": 192825,
+      "packet_bytes": 219391
+    },
+    {
+      "run": 2,
+      "generation_seconds": 3.276171744,
+      "verification_seconds": 1.769814998,
+      "serialization_seconds": 0.033568241,
+      "accumulator_bytes": 193081,
+      "packet_bytes": 217843
+    },
+    {
+      "run": 3,
+      "generation_seconds": 3.204814896,
+      "verification_seconds": 1.818493947,
+      "serialization_seconds": 0.032361053,
+      "accumulator_bytes": 193081,
+      "packet_bytes": 215207
+    }
+  ],
+  "accumulator_worker_generation_s": [
+    3.062493,
+    3.156493,
+    3.092628,
+    3.196174,
+    3.410164,
+    2.91064,
+    3.431691,
+    3.431932,
+    3.31463,
+    3.389135,
+    3.013748,
+    3.073523,
+    2.892356
+  ],
+  "accumulator_worker_verification_s": [
+    1.811934,
+    1.759224,
+    1.808556,
+    1.764464,
+    1.823965,
+    1.684531,
+    1.858151,
+    1.952828,
+    1.689351,
+    1.944308,
+    1.777794,
+    1.835868,
+    1.679752
+  ],
+  "workflow_measurements": [
+    {
+      "phase": "runtime_initialization",
+      "seconds": 0.001622751
+    },
+    {
+      "phase": "ta_setup",
+      "seconds": 4.048724391
+    },
+    {
+      "phase": "keygen_3uav_1gcs_and_test_identity_selection",
+      "seconds": 0.006887272
+    },
+    {
+      "phase": "registration_3uav_1gcs",
+      "seconds": 0.000107922
+    },
+    {
+      "phase": "issue_uav1",
+      "seconds": 3.2155765
+    },
+    {
+      "phase": "issue_uav2",
+      "seconds": 3.290437721
+    },
+    {
+      "phase": "issue_uav_local",
+      "seconds": 3.300448611
+    },
+    {
+      "phase": "prover_prewarm",
+      "seconds": 3.15662057
+    },
+    {
+      "phase": "verifier_prewarm",
+      "seconds": 1.449109823
+    },
+    {
+      "phase": "ta_tail4_prefetch",
+      "seconds": 0.545621216
+    },
+    {
+      "phase": "uav_tail4_prefetch_auth_cache",
+      "seconds": 0.006293446
+    },
+    {
+      "phase": "ta_delete_delta6_and_compatible_tail4",
+      "seconds": 1.255197965
+    },
+    {
+      "phase": "ta_update_manifest_export",
+      "seconds": 7.9013e-05
+    },
+    {
+      "phase": "uncached_local_update_with_clear_verify",
+      "seconds": 1.319886521
+    },
+    {
+      "phase": "uav_delta6_update",
+      "seconds": 0.037408352
+    },
+    {
+      "phase": "post_update_show_generation_including_serialization",
+      "seconds": 3.901840925
+    },
+    {
+      "phase": "post_update_show_wire_verification",
+      "seconds": 1.775424033
+    },
+    {
+      "phase": "ta_memwitsync_export",
+      "seconds": 3.406057872
+    },
+    {
+      "phase": "memwitsync_recovery_with_clear_checks",
+      "seconds": 4.501346402
+    },
+    {
+      "phase": "full_test_wall_including_checks_and_cleanup",
+      "seconds": 110.116080187
+    }
+  ],
+  "post_update_show": [
+    {
+      "generation_seconds": 3.901840925,
+      "verification_seconds": 1.775424033,
+      "serialization_seconds": 0.039162688,
+      "accumulator_bytes": 193081,
+      "packet_bytes": 215247
+    }
+  ],
+  "mean": {
+    "generation_seconds": 3.213675422,
+    "verification_seconds": 1.8038469503333334,
+    "serialization_seconds": 0.03270203133333333,
+    "accumulator_bytes": 192995.66666666666,
+    "packet_bytes": 217480.33333333334
+  },
+  "range": {
+    "generation_seconds": [
+      3.160039626,
+      3.276171744
+    ],
+    "verification_seconds": [
+      1.769814998,
+      1.823231906
+    ],
+    "serialization_seconds": [
+      0.0321768,
+      0.033568241
+    ],
+    "accumulator_bytes": [
+      192825,
+      193081
+    ],
+    "packet_bytes": [
+      215207,
+      219391
+    ]
+  },
+  "target_met_all_runs": false
+}

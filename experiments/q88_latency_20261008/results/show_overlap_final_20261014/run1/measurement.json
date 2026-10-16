@@ -1,0 +1,165 @@
+{
+  "profile": "production complete q88 CRT compact v3",
+  "server": "autodl-pqa11",
+  "generation_includes_serialization": true,
+  "excludes_initialization_issue_and_revocation": true,
+  "measurements": [
+    {
+      "run": 1,
+      "generation_seconds": 3.292017542,
+      "verification_seconds": 1.701235645,
+      "serialization_seconds": 0.030866213,
+      "accumulator_bytes": 192825,
+      "packet_bytes": 219551
+    },
+    {
+      "run": 2,
+      "generation_seconds": 3.216108479,
+      "verification_seconds": 1.648888126,
+      "serialization_seconds": 0.034375347,
+      "accumulator_bytes": 193017,
+      "packet_bytes": 217834
+    },
+    {
+      "run": 3,
+      "generation_seconds": 3.114403859,
+      "verification_seconds": 1.637528159,
+      "serialization_seconds": 0.034476906,
+      "accumulator_bytes": 193017,
+      "packet_bytes": 217882
+    }
+  ],
+  "accumulator_worker_generation_s": [
+    3.199442,
+    3.102817,
+    3.019936,
+    2.947548
+  ],
+  "accumulator_worker_verification_s": [
+    1.689554,
+    1.63991,
+    1.628169,
+    1.622184
+  ],
+  "workflow_measurements": [
+    {
+      "phase": "runtime_initialization",
+      "seconds": 0.001762658
+    },
+    {
+      "phase": "ta_setup",
+      "seconds": 4.168937176
+    },
+    {
+      "phase": "keygen_3uav_1gcs_and_test_identity_selection",
+      "seconds": 0.008449703
+    },
+    {
+      "phase": "registration_3uav_1gcs",
+      "seconds": 0.00010851
+    },
+    {
+      "phase": "issue_uav1",
+      "seconds": 3.212686673
+    },
+    {
+      "phase": "issue_uav2",
+      "seconds": 3.28067825
+    },
+    {
+      "phase": "issue_uav_local",
+      "seconds": 3.288516864
+    },
+    {
+      "phase": "prover_prewarm",
+      "seconds": 2.627097428
+    },
+    {
+      "phase": "verifier_prewarm",
+      "seconds": 1.42835927
+    },
+    {
+      "phase": "ta_tail4_prefetch",
+      "seconds": 0.472783238
+    },
+    {
+      "phase": "uav_tail4_prefetch_auth_cache",
+      "seconds": 0.005027771
+    },
+    {
+      "phase": "ta_delete_delta6_and_compatible_tail4",
+      "seconds": 1.109311283
+    },
+    {
+      "phase": "ta_update_manifest_export",
+      "seconds": 6.8486e-05
+    },
+    {
+      "phase": "uncached_local_update_with_clear_verify",
+      "seconds": 1.278995492
+    },
+    {
+      "phase": "uav_delta6_update",
+      "seconds": 0.040988632
+    },
+    {
+      "phase": "post_update_show_generation_including_serialization",
+      "seconds": 3.670199923
+    },
+    {
+      "phase": "post_update_show_wire_verification",
+      "seconds": 1.630987093
+    },
+    {
+      "phase": "ta_memwitsync_export",
+      "seconds": 3.302491874
+    },
+    {
+      "phase": "memwitsync_recovery_with_clear_checks",
+      "seconds": 4.673297957
+    },
+    {
+      "phase": "full_test_wall_including_checks_and_cleanup",
+      "seconds": 56.259792469
+    }
+  ],
+  "post_update_show": [
+    {
+      "generation_seconds": 3.670199923,
+      "verification_seconds": 1.630987093,
+      "serialization_seconds": 0.033584215,
+      "accumulator_bytes": 193177,
+      "packet_bytes": 217371
+    }
+  ],
+  "mean": {
+    "generation_seconds": 3.20750996,
+    "verification_seconds": 1.6625506433333332,
+    "serialization_seconds": 0.033239488666666664,
+    "accumulator_bytes": 192953,
+    "packet_bytes": 218422.33333333334
+  },
+  "range": {
+    "generation_seconds": [
+      3.114403859,
+      3.292017542
+    ],
+    "verification_seconds": [
+      1.637528159,
+      1.701235645
+    ],
+    "serialization_seconds": [
+      0.030866213,
+      0.034476906
+    ],
+    "accumulator_bytes": [
+      192825,
+      193017
+    ],
+    "packet_bytes": [
+      217834,
+      219551
+    ]
+  },
+  "target_met_all_runs": false
+}

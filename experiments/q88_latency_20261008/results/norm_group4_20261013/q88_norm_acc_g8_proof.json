@@ -1,0 +1,28 @@
+{
+  "profile": "production CRT isolated accumulator norm grouping v2",
+  "norm_group_size": 8,
+  "approx_order": "baseline",
+  "fixture": "/tmp/q88bridge_full",
+  "prewarm_prover_seconds": 1.876955807209015,
+  "prewarm_verifier_seconds": 5.183090358972549,
+  "clear_verify": true,
+  "pack_reload_verify": true,
+  "negative_checks": false,
+  "measurements": [
+    {
+      "generation_seconds": 3.354042738676071,
+      "verification_seconds": 1.9337089136242867,
+      "proof_bytes": 192601
+    },
+    {
+      "generation_seconds": 3.0688875019550323,
+      "verification_seconds": 1.8119464293122292,
+      "proof_bytes": 192633
+    },
+    {
+      "generation_seconds": 3.119671031832695,
+      "verification_seconds": 1.9791708290576935,
+      "proof_bytes": 193273
+    }
+  ]
+}

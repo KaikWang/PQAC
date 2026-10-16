@@ -6,6 +6,7 @@
 
 #include "acc_genpp.h"
 #include "acc96_accumulator.h"
+#include "acc96_exact_lift.h"
 #include "osig.h"
 #include "show.h"
 
@@ -219,6 +220,11 @@ typedef struct {
   int64_t memver_lift_cache[PARAM_D][PARAM_N];
   uint8_t memver_lift_cache_key[REVAC_CONTEXT_HASH_BYTES];
   int memver_lift_cache_valid;
+  /* q88 exact lift is bound to the full validated MemVer digest. */
+  acc96_exact_lift_t *memver_q88_lift_cache;
+  uint8_t memver_q88_lift_key[REVAC_CONTEXT_HASH_BYTES];
+  int memver_q88_lift_valid;
+  unsigned memver_q88_lift_bits;
   /* Optional idle-time T4 prefetch cache.  Entries are public update
      acceleration data, not credentials or secret witness material. */
   revac_q96_tail_cache_entry_t q96_tail_cache[ACC96_MAX_MEMBERS];

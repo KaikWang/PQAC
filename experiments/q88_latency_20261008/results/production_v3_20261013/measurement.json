@@ -1,0 +1,92 @@
+{
+  "profile": "production complete q88 CRT compact v3",
+  "server": "autodl-pqa11",
+  "generation_includes_serialization": true,
+  "excludes_initialization_issue_and_revocation": true,
+  "measurements": [
+    {
+      "run": 1,
+      "generation_seconds": 3.792042129,
+      "verification_seconds": 1.985664062,
+      "serialization_seconds": 0.039279357,
+      "accumulator_bytes": 193081,
+      "packet_bytes": 215253
+    },
+    {
+      "run": 2,
+      "generation_seconds": 3.438231006,
+      "verification_seconds": 1.854091674,
+      "serialization_seconds": 0.039820082,
+      "accumulator_bytes": 192889,
+      "packet_bytes": 222346
+    },
+    {
+      "run": 3,
+      "generation_seconds": 4.002032101,
+      "verification_seconds": 1.916744068,
+      "serialization_seconds": 0.033184543,
+      "accumulator_bytes": 193049,
+      "packet_bytes": 217382
+    },
+    {
+      "run": 4,
+      "generation_seconds": 3.062824301,
+      "verification_seconds": 1.913722552,
+      "serialization_seconds": 0.043596871,
+      "accumulator_bytes": 193081,
+      "packet_bytes": 217522
+    },
+    {
+      "run": 5,
+      "generation_seconds": 3.028476454,
+      "verification_seconds": 1.724339411,
+      "serialization_seconds": 0.042683259,
+      "accumulator_bytes": 193113,
+      "packet_bytes": 217555
+    }
+  ],
+  "accumulator_worker_generation_s": [
+    3.674506,
+    3.32036,
+    3.878595,
+    2.938689,
+    2.913989
+  ],
+  "accumulator_worker_verification_s": [
+    1.972,
+    1.841715,
+    1.906319,
+    1.901749,
+    1.708636
+  ],
+  "mean": {
+    "generation_seconds": 3.4647211982,
+    "verification_seconds": 1.8789123534,
+    "serialization_seconds": 0.0397128224,
+    "accumulator_bytes": 193042.6,
+    "packet_bytes": 218011.6
+  },
+  "range": {
+    "generation_seconds": [
+      3.028476454,
+      4.002032101
+    ],
+    "verification_seconds": [
+      1.724339411,
+      1.985664062
+    ],
+    "serialization_seconds": [
+      0.033184543,
+      0.043596871
+    ],
+    "accumulator_bytes": [
+      192889,
+      193113
+    ],
+    "packet_bytes": [
+      215253,
+      222346
+    ]
+  },
+  "target_met_all_runs": false
+}

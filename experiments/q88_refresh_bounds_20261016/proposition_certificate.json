@@ -1,0 +1,15 @@
+{
+  "B_fresh_squared": 113336795377765253308545,
+  "C_delta_squared": 9759682314537677664042828521472,
+  "ceil_B_fresh": 336655306475,
+  "ceil_C_delta": 3124049025629668,
+  "integer_norm_upper_bound_at_50000": 156202451618138706475,
+  "norm_squared_bound_strictly_below_2_pow_153": true,
+  "coefficient_update_bound": 4155261149184,
+  "coefficient_encoding_gate_W": 207763058532941823,
+  "right_coefficient_bound_at_50000": 207763057459200001,
+  "balanced_radix_4095_five_digit_capacity": 575757408375154687,
+  "centered_modulus_boundary": 154666956449990963579703296,
+  "accepted_fresh_witnesses_only": true,
+  "lifetime_security_claim": false
+}

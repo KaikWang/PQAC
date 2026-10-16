@@ -98,6 +98,52 @@ void acc96_relation_refresh_sample(
                         UINT32_C(0x5a383852), (uint32_t)block, 0);
 }
 
+static int fresh_head_poly_check(const acc96_poly_t *poly,
+                                  const acc96_ctx_t *ctx) {
+  for (size_t i = 0; i < ACC96_N; i++) {
+    const acc96_coeff_t *c = &poly->coeff[i];
+    if (c->limb[0] >= ACC96_P0 || c->limb[1] >= ACC96_P1 ||
+        c->limb[2] >= ACC96_P2) return 0;
+    const acc96_i128 value = acc96_coeff_to_centered(c, ctx);
+    if (value < -(acc96_i128)ACC96_FRESH_COEFF_BOUND ||
+        value > (acc96_i128)ACC96_FRESH_COEFF_BOUND) return 0;
+  }
+  return 1;
+}
+
+static int fresh_ternary_poly_check(const acc96_poly_t *poly) {
+  for (size_t i = 0; i < ACC96_N; i++) {
+    const acc96_coeff_t *c = &poly->coeff[i];
+    const int zero = c->limb[0] == 0 && c->limb[1] == 0 && c->limb[2] == 0;
+    const int one = c->limb[0] == 1 && c->limb[1] == 1 && c->limb[2] == 1;
+    const int minus_one = c->limb[0] == ACC96_P0-1 &&
+                          c->limb[1] == ACC96_P1-1 &&
+                          c->limb[2] == ACC96_P2-1;
+    if (!zero && !one && !minus_one) return 0;
+  }
+  return 1;
+}
+
+int acc96_relation_fresh_witness_check(
+    const acc96_relation_witness_t *witness, const acc96_ctx_t *ctx) {
+  if (witness == NULL || ctx == NULL || !ctx->initialized ||
+      !fresh_head_poly_check(&witness->left, ctx) ||
+      !fresh_head_poly_check(&witness->v12, ctx)) return 0;
+  for (size_t i = 0; i < ACC96_TRUNC_RIGHT; i++)
+    if (!fresh_head_poly_check(&witness->v2[i], ctx)) return 0;
+  for (size_t i = 0; i < ACC96_N; i++) {
+    const uint64_t expected = i == 0 ? 1U : 0U;
+    for (size_t lane = 0; lane < ACC96_LIMBS; lane++)
+      if (witness->tag.coeff[i].limb[lane] != expected) return 0;
+  }
+  for (size_t bit = 0; bit < ACC96_HANDLE_BITS; bit++)
+    for (size_t digit = 0; digit < ACC96_GADGET_DIGITS; digit++)
+      if (!fresh_ternary_poly_check(&witness->right.right[bit][digit])) return 0;
+  for (size_t block = 0; block < ACC96_REFRESH_BLOCKS; block++)
+    if (!fresh_ternary_poly_check(&witness->refresh_z[block])) return 0;
+  return 1;
+}
+
 int acc96_relation_pp_expand(acc96_relation_pp_t *pp,
                              const uint8_t seed[ACC96_SEED_BYTES],
                              const acc96_ctx_t *ctx) {

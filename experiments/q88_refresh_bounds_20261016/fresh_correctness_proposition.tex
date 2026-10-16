@@ -1,0 +1,183 @@
+% Insertion fragment. Requires amsmath and amssymb; no theorem environment
+% is declared here, so it can be wrapped in the manuscript's own environment.
+% This is a deterministic correctness/encoding proposition, not a security
+% theorem or a proof of negligible sampler abort probability.
+
+\paragraph{记号与参数.}
+令 $R=\mathbb Z[X]/(X^N+1)$，$R_q=R/qR$，其中
+\[
+ N=4096,\quad q=309333912899981927159406593,\quad
+ \ell=24,\quad k=6,\quad D=13003,\quad \kappa=128.
+\]
+对 $R_q$ 中的多项式采用逐系数中心整数表示；
+$\|\cdot\|_{\mathrm{coef},\infty}$ 表示所有系数绝对值的最大值，
+$\|\cdot\|_2$ 表示系数向量的欧氏范数。
+将成员见证写成 $w=(r,s_x)$，其中
+$s_x=(h,v,z,\tau)$，$h\in R_q^{24}$、
+$v\in R_q^{\ell k}$、$z\in R_q^k$、$\tau=1$、
+$r\in\{0,1\}^{\kappa}$。本文使用的扩展见证范数为
+\[
+ \|w\|_2^2=\|h\|_2^2+\|v\|_2^2+\|z\|_2^2
+ +\|\tau\|_2^2+\|r\|_2^2.
+\]
+成员等式写为
+\begin{equation}
+ Hh+R_xv+A_rz=\mathsf{Acc}_t\pmod q,
+ \qquad A_r=A_0+\sum_{i=1}^{\kappa}r_iA_i.
+ \label{eq:q88-refresh-member-relation}
+\end{equation}
+固定公参、范数门和原始见证系数编码门为
+\[
+ F=2^{30}-1,\qquad \beta=2^{153/2},\qquad
+ \Gamma=50000,\qquad P=kND^2,\qquad W=F+\Gamma P.
+\]
+
+\paragraph{命题（成功刷新后的更新余量恢复）.}
+设在任意时刻 $t$，尚未被撤销的成员 $x$ 获得一份新见证
+$w^{(0)}=(r,(h,v^{(0)},z,1))$，满足
+式~\eqref{eq:q88-refresh-member-relation}，且通过新鲜见证检查：
+\begin{equation}
+ \|h\|_{\mathrm{coef},\infty}\le F,
+ \qquad \|v^{(0)}\|_{\mathrm{coef},\infty}\le1,
+ \qquad \|z\|_{\mathrm{coef},\infty}\le1,
+ \qquad r\in\{0,1\}^{\kappa}.
+ \label{eq:q88-refresh-fresh-gate}
+\end{equation}
+设随后执行 $j\le\Gamma$ 次合法撤销更新，各次撤销均不针对 $x$，
+且使用同一套公参下的精确 balanced EvalFx 更新。
+则更新见证始终满足相应当前累加器的成员等式，并有
+\begin{align}
+ \|w^{(j)}\|_2
+ &\le B_{\mathrm{fresh}}+jC_{\Delta}<\beta,
+ \label{eq:q88-refresh-norm-envelope}\\
+ \|v^{(j)}\|_{\mathrm{coef},\infty}
+ &\le1+jP\le W,
+ \label{eq:q88-refresh-coefficient-envelope}
+\end{align}
+其中
+\begin{align}
+ B_{\mathrm{fresh}}^2
+ &=24NF^2+(\ell k+k)N+1+\kappa,
+ \label{eq:q88-refresh-fresh-bound}\\
+ C_{\Delta}^2
+ &=kN\bigl((\ell-1)P^2+D^2\bigr).
+ \label{eq:q88-refresh-delta-bound}
+\end{align}
+此外，$h,v^{(j)},z,\tau$ 的每个原始整数系数均满足编码门 $[-W,W]$，
+并可由五个基数为 $4095$、数位位于 $[-2047,2047]$ 的有符号数位精确表示。
+上述结论与时刻 $t$ 之前发生的撤销次数及旧见证范数无关。
+
+\paragraph{证明.}
+首先证明单次更新的界。
+若 $a,b\in R$ 的系数绝对值均不超过 $D$，
+则负循环卷积的每个系数由 $N$ 个带符号乘积相加得到，故
+\[
+ \|ab\|_{\mathrm{coef},\infty}\le ND^2.
+\]
+balanced gadget 分解保持 $GG^{-1}(U)=U$，
+且分解所得多项式的系数绝对值不超过 $D$。
+实际 EvalFx 的一个卷积层将 $k$ 个这样的乘积求和，因此各输出系数的界为
+$P=kND^2$。
+完整更新向量最多包含 $\ell-1$ 个卷积层，每层 $k$ 个多项式；
+末层若被使用，则直接输出 $G^{-1}(u_a)$，其系数界为 $D$。
+因此对任一次更新 $\Delta$，
+\[
+ \|\Delta\|_{\mathrm{coef},\infty}\le P,
+ \qquad
+ \|\Delta\|_2^2\le(\ell-1)kNP^2+kND^2=C_{\Delta}^2.
+\]
+
+为验证更新等式，令被撤销句柄为 $y\ne x$，
+$a$ 为 $x$ 与 $y$ 从低位起首个不同位。
+对公开 gadget 行 $G$ 和第 $i$ 个公开矩阵行 $B_i$，记
+\[
+ D_i(y)=\begin{cases}B_i,&y_i=1,\\G-B_i,&y_i=0,\end{cases}
+ \quad \epsilon_i=2y_i-1,\quad R_i(x)=B_i-x_iG.
+\]
+令 $T_{\ell}=G$，$K_{\ell-1}=I_k$，
+并从高位向低位定义
+$K_i=G^{-1}(T_{i+1})$（$i<\ell-1$）与 $T_i=D_i(y)K_i$。
+于是 $GK_i=T_{i+1}$，且
+\[
+ R_i(x)\epsilon_iK_i
+ =T_i-\boldsymbol{1}_{x_i=y_i}T_{i+1}.
+\]
+令 $U=G^{-1}(u_a)$。
+EvalFx 的第 $i$ 层增量为 $\epsilon_iK_iU$（$0\le i\le a$），
+其余层为零。对这些层求和得到
+\begin{equation}
+ R_x\Delta
+ =\sum_{i=0}^{a}
+   \bigl(T_i-\boldsymbol{1}_{x_i=y_i}T_{i+1}\bigr)U
+ =T_0U
+ =\mathsf{Acc}_{t+1}-\mathsf{Acc}_t\pmod q.
+ \label{eq:q88-refresh-update-identity}
+\end{equation}
+其中中间等式使用 $i<a$ 时 $x_i=y_i$、$i=a$ 时 $x_i\ne y_i$。
+因此将 $\Delta$ 加入 $v$ 后，成员等式保持成立。
+
+根据式~\eqref{eq:q88-refresh-fresh-gate}，新见证满足
+\[
+ \|w^{(0)}\|_2^2
+ \le24NF^2+\ell kN+kN+1+\kappa
+ =B_{\mathrm{fresh}}^2.
+\]
+后续更新不改变 $h,r,z,\tau$，只改变 $v$。
+把每次 $\Delta_i$ 嵌入完整见证的 $v$ 坐标，记为
+$\widetilde\Delta_i$，则
+\[
+ w^{(j)}=w^{(0)}+\sum_{i=1}^{j}\widetilde\Delta_i,
+ \qquad \|\widetilde\Delta_i\|_2=\|\Delta_i\|_2\le C_{\Delta}.
+\]
+由三角不等式及系数逐项估计，分别得到
+\[
+ \|w^{(j)}\|_2\le B_{\mathrm{fresh}}+jC_{\Delta},
+ \qquad
+ \|v^{(j)}\|_{\mathrm{coef},\infty}\le1+jP.
+\]
+这些等式先在整数提升中理解；下面验证所得系数界小于 $q/2$，
+故在所述范围内与中心模 $q$ 表示一致。
+
+代入参数有
+\begin{align*}
+ P&=4155261149184,\\
+ B_{\mathrm{fresh}}&<336655306475,\\
+ C_{\Delta}&<3124049025629668.
+\end{align*}
+以上两个严格上界可分别通过整数平方比较验证。
+故对任意 $j\le50000$，
+\begin{align*}
+ \|w^{(j)}\|_2
+ &<336655306475+50000\cdot3124049025629668\\
+ &=156202451618138706475
+ <2^{68}<2^{153/2}=\beta.
+\end{align*}
+编码门为
+\[
+ W=207763058532941823.
+\]
+更新后 $v$ 的系数绝对值满足
+\[
+ 1+jP\le207763057459200001\le W,
+\]
+而未更新的 $h,z,\tau$ 也满足该门。
+又有
+\[
+ W<\frac{4095^5-1}{2}
+ =575757408375154687<\frac q2.
+\]
+五个基数为奇数 $4095$ 的 balanced 数位恰能覆盖
+$[-(4095^5-1)/2,(4095^5-1)/2]$ 中的全部整数，
+从而所有原始见证系数均可精确编码，且没有中心表示回绕。
+
+最后，上述推导仅使用刷新时已检查的新见证、当前成员等式及后续增量，
+没有使用刷新前的撤销次数或旧见证范数。
+因此每次成功刷新后，成员重新获得所述 $50000$ 次合法更新的
+范数和原始见证系数编码余量。\hfill$\square$
+
+\paragraph{结论范围.}
+本命题是以刷新成功为条件的确定性正确性与系数编码结论，
+不声称 sampler 以可忽略概率失败，不声称所有 Pack 辅助约束或随机拒绝阶段
+均由此获得成功保证，也不证明固定公参下任意多次刷新后的撤销健全性。
+现有程序的全局 Delete 计数策略与该代数命题分开处理；
+不能据此直接移除计数限制或宣称端到端无限期撤销安全。

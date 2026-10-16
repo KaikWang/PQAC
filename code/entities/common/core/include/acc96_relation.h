@@ -23,6 +23,9 @@
 #define ACC96_REFRESH_BITS 128U
 #define ACC96_REFRESH_BYTES (ACC96_REFRESH_BITS / 8U)
 #define ACC96_REFRESH_BLOCKS ACC96_GADGET_DIGITS
+/* Accepted fresh samples: 24 head polynomials are bounded by F; right/z
+ * remain ternary. This is separate from the larger post-update bound. */
+#define ACC96_FRESH_COEFF_BOUND ((int64_t)((UINT64_C(1) << 30) - 1))
 /* The proof parameters and witness norm bound are instantiated for one
  * replacement-free window containing at most this many deletions.  A fresh
  * window must be created before accepting another deletion. */
@@ -96,6 +99,12 @@ void acc96_relation_refresh_apply(
 void acc96_relation_refresh_sample(
     acc96_relation_witness_t *witness,
     const uint8_t seed[ACC96_SEED_BYTES]);
+
+/* Check newly sampled witnesses only: head coefficients in [-F,F], right/z
+ * ternary, tag=1, canonical CRT coefficients. Does not check membership or
+ * certify sampling probabilities. Never apply this to an updated witness. */
+int acc96_relation_fresh_witness_check(
+    const acc96_relation_witness_t *witness, const acc96_ctx_t *ctx);
 
 /* Evaluate the exact MemVer left-hand side in R_q. */
 void acc96_relation_evaluate(acc96_poly_t *out,

@@ -52,6 +52,7 @@ static unsigned int revac_uav_parallel_signature_threads(void) {
 static void revac_uav_invalidate_memver_caches(revac_uav_t *uav) {
   uav->memver_cache_valid = 0;
   uav->memver_lift_cache_valid = 0;
+  uav->memver_q88_lift_valid = 0;
 }
 
 static void revac_uav_memver_absorb_u32(keccak_state *state, uint32_t value) {
@@ -94,6 +95,10 @@ static void revac_uav_memver_q96_cache_key(
 
   shake256_init(&state);
   shake256_absorb(&state, domain, sizeof(domain) - 1);
+  char norm_bound[96];
+  const int norm_bytes = snprintf(norm_bound, sizeof(norm_bound), "%.36La",
+                                  public_state->acc96_witness_norm_sq_bound);
+  shake256_absorb(&state, (const uint8_t *)norm_bound, (size_t)norm_bytes);
   shake256_absorb(&state, public_state->context_pp_hash,
                   REVAC_CONTEXT_HASH_BYTES);
   revac_uav_memver_absorb_u32(&state, public_state->acc96_seq);
@@ -174,6 +179,8 @@ void revac_uav_clear(revac_uav_t *uav) {
     uav->q96_tail_cache[i].tail4_packed = NULL;
     uav->q96_tail_cache[i].used = 0;
   }
+  free(uav->memver_q88_lift_cache);
+  uav->memver_q88_lift_cache = NULL;
   free(uav->acc96_witness);
   uav->acc96_witness = NULL;
   acc_genpp_wit_clear(&uav->witness);
@@ -212,6 +219,44 @@ int revac_uav_memver_q96(const revac_uav_t *uav,
                                public_state->acc96_ctx);
 }
 
+static int revac_uav_q88_prepare_checked_lift(
+    revac_uav_t *uav, const revac_public_state_t *public_state) {
+  const char *mode = getenv("REVAC_Q88_CHECKED_LIFT_CACHE");
+  if (!revac_labrador_online_enabled() || (mode && mode[0] == '0'))
+    return revac_uav_memver_q96(uav, public_state);
+  uav->memver_q88_lift_valid = 0;
+  if (!uav->issued || !public_state->acc96_ctx || !public_state->acc96_pp ||
+      !public_state->acc96_acc || !uav->acc96_witness ||
+      uav->last_seq != public_state->acc96_seq ||
+      !(public_state->acc96_witness_norm_sq_bound > 0.0L) ||
+      !(acc96_relation_witness_norm2(uav->acc96_witness, public_state->acc96_ctx)
+        <= public_state->acc96_witness_norm_sq_bound)) return 0;
+  if (!uav->memver_q88_lift_cache)
+    uav->memver_q88_lift_cache = malloc(sizeof(*uav->memver_q88_lift_cache));
+  if (!uav->memver_q88_lift_cache || !acc96_memver_exact_lift(
+      uav->memver_q88_lift_cache, &uav->memver_q88_lift_bits, public_state->acc96_pp,
+      public_state->acc96_acc, uav->handle, uav->acc96_witness,
+      public_state->acc96_ctx)) return 0;
+  /* Divisibility in all three primes proves the same modular MemVer
+     equation. The original aggregate norm bound was checked above. */
+  revac_uav_memver_q96_cache_key(uav->memver_q88_lift_key, public_state, uav);
+  uav->memver_q88_lift_valid = 1;
+  return 1;
+}
+
+int revac_uav_q88_cached_lift_copy(acc96_exact_lift_t *out, unsigned *maximum_abs_bits,
+    const revac_uav_t *uav, const revac_public_state_t *public_state) {
+  uint8_t key[REVAC_CONTEXT_HASH_BYTES];
+  if (!out || !uav || !public_state || !uav->memver_q88_lift_valid ||
+      !uav->memver_q88_lift_cache || !uav->acc96_witness ||
+      !public_state->acc96_acc || uav->last_seq != public_state->acc96_seq) return 0;
+  revac_uav_memver_q96_cache_key(key, public_state, uav);
+  if (memcmp(key, uav->memver_q88_lift_key, sizeof(key))) return 0;
+  memcpy(out, uav->memver_q88_lift_cache, sizeof(*out));
+  if (maximum_abs_bits) *maximum_abs_bits = uav->memver_q88_lift_bits;
+  return 1;
+}
+
 int revac_uav_memver_cache_prewarm(
     revac_uav_t *uav, const revac_public_state_t *public_state) {
   uint8_t cache_key[REVAC_CONTEXT_HASH_BYTES];
@@ -226,7 +271,7 @@ int revac_uav_memver_cache_prewarm(
       memcmp(uav->memver_cache_key, cache_key, sizeof(cache_key)) == 0) {
     return 1;
   }
-  if (!revac_uav_memver_q96(uav, public_state)) {
+  if (!revac_uav_q88_prepare_checked_lift(uav, public_state)) {
     uav->memver_cache_valid = 0;
     return 0;
   }
@@ -1043,14 +1088,23 @@ int revac_uav_show_prove(revac_show_proof_t *proof,
     return 0;
   }
   step_started = revac_uav_monotonic_seconds();
-  if (public_state->acc_profile == REVAC_ACC_PROFILE_Q96) {
+  const char *async_precheck_mode = getenv("REVAC_Q88_ASYNC_PRECHECK");
+  const int async_precheck = public_state->acc_profile == REVAC_ACC_PROFILE_Q96 &&
+      revac_labrador_online_enabled() && revac_uav_parallel_show_enabled() &&
+      (async_precheck_mode != NULL && async_precheck_mode[0] == '1');
+  if (async_precheck) {
+    /* The proof thread checks the complete state/witness before dispatch.
+       Signature work only reads the witness and does not touch these caches.
+       No proof is returned until both tasks have succeeded. */
+    memver_cache_hit = 0;
+  } else if (public_state->acc_profile == REVAC_ACC_PROFILE_Q96) {
     revac_uav_memver_q96_cache_key(memver_key, public_state, uav);
     memver_cache_hit =
         uav->memver_cache_valid &&
         uav->memver_cache_seq == public_state->acc96_seq &&
         memcmp(uav->memver_cache_key, memver_key, sizeof(memver_key)) == 0;
     if (!memver_cache_hit) {
-      if (!revac_uav_memver_q96(uav, public_state)) {
+      if (!revac_uav_q88_prepare_checked_lift(uav, public_state)) {
         uav->memver_cache_valid = 0;
         return 0;
       }
@@ -1076,6 +1130,7 @@ int revac_uav_show_prove(revac_show_proof_t *proof,
     }
   }
   revac_uav_print_proof_timing(
+      async_precheck ? "UAV MemVer 预检查委托证明线程" :
       memver_cache_hit ? "UAV 累加器 MemVer 摘要缓存命中"
                        : "UAV 累加器 MemVer 预检查（缓存未命中）",
       step_started);
@@ -1129,6 +1184,10 @@ int revac_uav_show_prove(revac_show_proof_t *proof,
         &labrador_job, proof, public_state, uav, link_randomness);
   }
 
+  /* Failed thread creation uses the same checks on the serial fallback. */
+  if (async_precheck && labrador_job == NULL &&
+      !revac_uav_memver_cache_prewarm(uav, public_state)) goto cleanup;
+
   step_started = revac_uav_monotonic_seconds();
   if (labrador_job != NULL) {
     show_user_prove_set_thread_cap(revac_uav_parallel_signature_threads());
@@ -1151,6 +1210,8 @@ int revac_uav_show_prove(revac_show_proof_t *proof,
       labrador_job = NULL;
     } else {
       labrador_job = NULL;
+      if (async_precheck &&
+          !revac_uav_memver_cache_prewarm(uav, public_state)) goto cleanup;
       const int proved = public_state->acc_profile == REVAC_ACC_PROFILE_Q96
           ? revac_labrador_q96_memver_prove(
                 proof, public_state, uav, link_randomness)

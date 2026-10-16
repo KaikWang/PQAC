@@ -29,6 +29,11 @@ static double monotonic_seconds(void) {
   return (double)now.tv_sec + (double)now.tv_nsec / 1000000000.0;
 }
 
+static void workflow_timing(const char *phase, double seconds) {
+  printf("[q88 workflow measurement] {\"phase\":\"%s\",\"seconds\":%.9f}\n",
+         phase, seconds);
+}
+
 static size_t q96_show_repetitions(void) {
   const char *value = getenv("REVAC_Q96_SHOW_REPETITIONS");
   char *end = NULL;
@@ -158,6 +163,8 @@ int main(void) {
   unsigned exact_lift_bits = 0;
   int ok = 0;
   int verify_guard_initialized = 0;
+  const double workflow_started = monotonic_seconds();
+  double phase_started = workflow_started;
 
   arith_setup();
   random_init();
@@ -177,13 +184,17 @@ int main(void) {
     goto cleanup;
   }
   verify_guard_initialized = 1;
+  workflow_timing("runtime_initialization", monotonic_seconds() - phase_started);
 
   puts("累加器配置：q88 候选 D（兼容 acc96 API），24-bit handle，"
        "balanced base-26007 x 6，50000-delete window。");
 
+  phase_started = monotonic_seconds();
   if (!require(revac_ta_setup(&ta), "默认 q88 Setup/ACB trapdoor 认证失败")) {
     goto cleanup;
   }
+  workflow_timing("ta_setup", monotonic_seconds() - phase_started);
+  phase_started = monotonic_seconds();
   revac_uav_keygen(&uav1, UINT64_C(1001), ta.ta_pk.seed);
   revac_uav_keygen(&uav2, UINT64_C(1002), ta.ta_pk.seed);
   revac_uav_keygen(&uav_local, UINT64_C(2002), ta.ta_pk.seed);
@@ -208,18 +219,26 @@ int main(void) {
     uav_local.id = local_identity;
   }
   revac_gcs_keygen(&gcs, UINT64_C(2001), ta.ta_pk.seed, UINT64_C(1));
+  workflow_timing("keygen_3uav_1gcs_and_test_identity_selection", monotonic_seconds() - phase_started);
   randombytes(msg, sizeof(msg));
+  phase_started = monotonic_seconds();
   if (!require(revac_ta_register_uav(&ta, &uav1), "UAV1 注册失败") ||
       !require(revac_ta_register_uav(&ta, &uav2), "UAV2 注册失败") ||
       !require(revac_ta_register_uav(&ta, &uav_local),
                "LOCAL 回退 UAV 注册失败") ||
-      !require(revac_ta_register_gcs(&ta, &gcs), "GCS 注册失败") ||
-      !require(revac_ta_issue_uav(&ta, &uav1, msg), "q96 UAV1 Issue 失败") ||
-      !require(revac_ta_issue_uav(&ta, &uav2, msg), "q96 UAV2 Issue 失败") ||
-      !require(revac_ta_issue_uav(&ta, &uav_local, msg),
-               "q96 LOCAL 回退 UAV Issue 失败")) {
+      !require(revac_ta_register_gcs(&ta, &gcs), "GCS 注册失败")) {
     goto cleanup;
   }
+  workflow_timing("registration_3uav_1gcs", monotonic_seconds() - phase_started);
+  phase_started = monotonic_seconds();
+  if (!require(revac_ta_issue_uav(&ta, &uav1, msg), "q88 issue_uav1 失败")) goto cleanup;
+  workflow_timing("issue_uav1", monotonic_seconds() - phase_started);
+  phase_started = monotonic_seconds();
+  if (!require(revac_ta_issue_uav(&ta, &uav2, msg), "q88 issue_uav2 失败")) goto cleanup;
+  workflow_timing("issue_uav2", monotonic_seconds() - phase_started);
+  phase_started = monotonic_seconds();
+  if (!require(revac_ta_issue_uav(&ta, &uav_local, msg), "q88 issue_uav_local 失败")) goto cleanup;
+  workflow_timing("issue_uav_local", monotonic_seconds() - phase_started);
 
   revac_ta_public_state(&public_state, &ta);
   expanded_pp = malloc(sizeof(*expanded_pp));
@@ -300,6 +319,8 @@ int main(void) {
       goto cleanup;
     }
     verifier_seconds = monotonic_seconds() - started;
+    workflow_timing("prover_prewarm", prover_seconds);
+    workflow_timing("verifier_prewarm", verifier_seconds);
     printf("q96 离线预热（不计入在线 show）：UAV %.3f 秒，GCS %.3f 秒。"
            "设置 REVAC_LABRADOR_Q96_PREWARM=0 可测冷启动。\n",
            prover_seconds, verifier_seconds);
@@ -310,6 +331,7 @@ int main(void) {
       const double prove_started = monotonic_seconds();
       double prove_seconds;
       double verify_seconds;
+      double pack_started, pack_seconds;
 
       if (run != 0) randombytes(nonce, sizeof(nonce));
       free(show_wire);
@@ -321,6 +343,7 @@ int main(void) {
         goto cleanup;
       }
       prove_seconds = monotonic_seconds() - prove_started;
+      pack_started = monotonic_seconds();
       if (!require(show.acc_zk_kind == REVAC_ACC_ZK_Q96_LABRADOR_MEMVER,
                    "q96 show 没有使用独立 proof kind") ||
           !require(revac_show_proof_pack_compact(
@@ -328,6 +351,8 @@ int main(void) {
                    "q96 show compact/deflate 编码失败")) {
         goto cleanup;
       }
+      pack_seconds = monotonic_seconds() - pack_started;
+      prove_seconds += pack_seconds; /* Complete packet generation, including deflate. */
       {
         const double verify_started = monotonic_seconds();
         if (!require(revac_gcs_verify_show_wire_guarded_parallel(
@@ -344,6 +369,19 @@ int main(void) {
              "压缩后完整 show packet %.2f KiB。\n",
              run + 1, repetitions, prove_seconds, verify_seconds,
              show.acc_zk_proof_len / 1024.0, show_wire_len / 1024.0);
+      printf("[q88 full packet measurement] {\"run\":%zu,"
+             "\"generation_seconds\":%.9f,\"verification_seconds\":%.9f,"
+             "\"serialization_seconds\":%.9f,\"accumulator_bytes\":%zu,"
+             "\"packet_bytes\":%zu}\n",
+             run + 1, prove_seconds, verify_seconds, pack_seconds,
+             show.acc_zk_proof_len, show_wire_len);
+      if (!require(write_optional_artifact("REVAC_Q88_SHOW_PACKET_DUMP",
+                                          show_wire, show_wire_len),
+                   "写出完整 q88 show packet 失败") ||
+          !require(write_optional_artifact("REVAC_Q88_ACCUMULATOR_DUMP",
+                                          show.acc_zk_proof,
+                                          show.acc_zk_proof_len),
+                   "写出 q88 accumulator envelope 失败")) goto cleanup;
       {
         revac_public_state_t next_window_state = public_state;
         next_window_state.window_id++;
@@ -366,6 +404,7 @@ int main(void) {
     goto cleanup;
   }
   q96_prefetch_seconds = monotonic_seconds() - q96_prefetch_started;
+  workflow_timing("ta_tail4_prefetch", q96_prefetch_seconds);
   prefetch_wire[8] ^= UINT8_C(1);
   if (!require(!revac_uav_cache_q96_tail4_prefetch(
                    &uav2, &public_state, prefetch_wire, prefetch_wire_len),
@@ -387,17 +426,20 @@ int main(void) {
     goto cleanup;
   }
   prefetch_wire[prefetch_wire_len - 1] ^= UINT8_C(1);
+  phase_started = monotonic_seconds();
   if (!require(revac_uav_cache_q96_tail4_prefetch(
                    &uav2, &public_state, prefetch_wire, prefetch_wire_len),
                "UAV 在撤销前验签并缓存 q96 T4 prefetch 失败")) {
     goto cleanup;
   }
+  workflow_timing("uav_tail4_prefetch_auth_cache", monotonic_seconds() - phase_started);
   q96_update_started = monotonic_seconds();
   if (!require(revac_ta_revoke_uav_q96(&ta, uav1.handle, &update),
                "q96 Delete 失败")) {
     goto cleanup;
   }
   q96_delete_seconds = monotonic_seconds() - q96_update_started;
+  workflow_timing("ta_delete_delta6_and_compatible_tail4", q96_delete_seconds);
   memcpy(first_acc_digest, show_context.acc_digest, sizeof(first_acc_digest));
   show_context.acc_digest[0] ^= 1U;
   if (!require(!revac_show_context_matches_public(&show_context, &public_state),
@@ -412,6 +454,7 @@ int main(void) {
     goto cleanup;
   }
   revac_show_context_from_public(&show_context, &public_state, uav2.pk.seed);
+  phase_started = monotonic_seconds();
   if (!require(revac_ta_export_q96_update(
                    &ta, update.sequence, &update_wire, &update_wire_len),
                "TA 导出 q96 签名 BML 更新失败") ||
@@ -430,6 +473,7 @@ int main(void) {
                "写出 q96 manifest artifact 失败")) {
     goto cleanup;
   }
+  workflow_timing("ta_update_manifest_export", monotonic_seconds() - phase_started);
   {
     uint32_t difference = update.revoked_handle ^ uav2.handle;
     while ((difference & 1U) == 0U) {
@@ -503,6 +547,7 @@ int main(void) {
     }
     memcpy(uncached.acc96_witness, uav2.acc96_witness,
            sizeof(*uncached.acc96_witness));
+    phase_started = monotonic_seconds();
     if (!require(revac_uav_apply_update_q96_manifest(
                      &uncached, &public_state, manifest_wire,
                      manifest_wire_len),
@@ -512,6 +557,7 @@ int main(void) {
       revac_uav_clear(&uncached);
       goto cleanup;
     }
+    workflow_timing("uncached_local_update_with_clear_verify", monotonic_seconds() - phase_started);
     revac_uav_clear(&uncached);
   }
   manifest_wire[12] ^= UINT8_C(1);
@@ -626,6 +672,7 @@ int main(void) {
     goto cleanup;
   }
   q96_update_seconds = monotonic_seconds() - q96_update_started;
+  workflow_timing("uav_delta6_update", q96_update_seconds);
   if (!require(revac_gcs_verify_uav(&public_state, &gcs, &uav2, msg),
                "更新后 UAV2 q96 MemVer 失败") ||
       !require(!revac_ta_revoke_uav_q96(&ta, uav1.handle, &update),
@@ -641,7 +688,67 @@ int main(void) {
             (long long)ACC96_WINDOW_COEFF_BOUND);
     goto cleanup;
   }
+  const char *prepare_after_update = getenv("REVAC_Q88_POST_UPDATE_PREWARM");
+  if (revac_labrador_online_enabled() && prepare_after_update &&
+      prepare_after_update[0] == '1') {
+    revac_q88_prepare_async_t *prepare_job = NULL;
+    double task_seconds = 0.0;
+    phase_started = monotonic_seconds();
+    if (!require(revac_q88_prepare_async_start(&prepare_job, &public_state, &uav2),
+                 "更新后异步 Show prepare 启动失败") ||
+        !require(revac_q88_prepare_async_finish(prepare_job, &task_seconds),
+                 "更新后异步 Show prepare 检查失败")) goto cleanup;
+    workflow_timing("post_update_prepare_wall", monotonic_seconds() - phase_started);
+    workflow_timing("post_update_prepare_task", task_seconds);
+    puts("Q88_BACKGROUND_PREPARE_PASS");
+  }
+  if (revac_labrador_online_enabled()) {
+    double generated, packed, verified;
+    randombytes(nonce, sizeof(nonce));
+    phase_started = monotonic_seconds();
+    free(show_wire);
+    show_wire = NULL;
+    show_wire_len = 0;
+    if (!require(revac_uav_show_prove(&show, &public_state, &uav2, msg, nonce),
+                 "撤销更新后完整 q88 Show 生成失败")) goto cleanup;
+    generated = monotonic_seconds() - phase_started;
+    phase_started = monotonic_seconds();
+    if (!require(revac_show_proof_pack_compact(&show_wire, &show_wire_len, &show, 1),
+                 "撤销更新后完整 q88 packet 序列化失败")) goto cleanup;
+    packed = monotonic_seconds() - phase_started;
+    phase_started = monotonic_seconds();
+    if (!require(revac_gcs_verify_show_wire_guarded_parallel(
+                     &public_state, &gcs, &show_context, &verify_guard,
+                     show_wire, show_wire_len),
+                 "撤销更新后完整 q88 Show 验证失败")) goto cleanup;
+    verified = monotonic_seconds() - phase_started;
+    workflow_timing("post_update_show_generation_including_serialization", generated + packed);
+    workflow_timing("post_update_show_wire_verification", verified);
+    printf("[q88 post-update packet measurement] {\"generation_seconds\":%.9f,"
+           "\"verification_seconds\":%.9f,\"serialization_seconds\":%.9f,"
+           "\"accumulator_bytes\":%zu,\"packet_bytes\":%zu}\n",
+           generated + packed, verified, packed, show.acc_zk_proof_len, show_wire_len);
+  }
   exact_lift = malloc(sizeof(*exact_lift));
+  if (revac_labrador_online_enabled() && uav2.memver_q88_lift_valid) {
+    acc96_coeff_t saved = uav2.acc96_witness->left.coeff[0];
+    revac_public_state_t lower_bound = public_state;
+    lower_bound.acc96_witness_norm_sq_bound *= 0.5L;
+    if (!require(exact_lift && revac_uav_q88_cached_lift_copy(
+                     exact_lift, NULL, &uav2, &public_state),
+                 "q88 digest-bound lift cache did not restore valid lift") ||
+        !require(!revac_uav_q88_cached_lift_copy(
+                     exact_lift, NULL, &uav2, &lower_bound),
+                 "q88 lift cache accepted changed norm bound")) goto cleanup;
+    uav2.acc96_witness->left.coeff[0].limb[0] ^= UINT64_C(1);
+    const int rejected = !revac_uav_q88_cached_lift_copy(
+        exact_lift, NULL, &uav2, &public_state);
+    uav2.acc96_witness->left.coeff[0] = saved;
+    if (!require(rejected, "q88 lift cache accepted changed witness") ||
+        !require(revac_uav_q88_cached_lift_copy(exact_lift, NULL, &uav2, &public_state),
+                 "q88 restored witness failed lift cache")) goto cleanup;
+    puts("Q88_LIFT_CACHE_NEGATIVE_AND_RESTORE_PASS");
+  }
   if (!require(exact_lift != NULL &&
                    acc96_memver_exact_lift(
                        exact_lift, &exact_lift_bits,
@@ -650,6 +757,43 @@ int main(void) {
                        public_state.acc96_ctx),
                "三条 q96 CRT MemVer 精确整数 lift 检查失败")) {
     goto cleanup;
+  }
+  const char *lift_benchmark=getenv("REVAC_Q88_LIFT_BENCHMARK");
+  if (lift_benchmark && lift_benchmark[0]=='1') {
+    const char *prior=getenv("REVAC_Q88_LIFT_SHARED_REFRESH");
+    char *saved_mode=prior ? strdup(prior) : NULL;
+    for (unsigned repeat=0;repeat<5;repeat++) {
+      const char *modes[]={"0","1","3"};
+      for (unsigned candidate=0;candidate<3;candidate++) {
+        const unsigned position=(candidate+repeat)%3;
+        setenv("REVAC_Q88_LIFT_SHARED_REFRESH",modes[position],1);
+        phase_started=monotonic_seconds();
+        if (!require(acc96_memver_exact_lift(exact_lift,&exact_lift_bits,
+            public_state.acc96_pp,public_state.acc96_acc,uav2.handle,
+            uav2.acc96_witness,public_state.acc96_ctx),"lift benchmark failed")) {
+          free(saved_mode);goto cleanup;
+        }
+        printf("[q88 lift benchmark] {\"mode\":%s,\"repeat\":%u,\"seconds\":%.9f}\n",
+               modes[position],repeat,monotonic_seconds()-phase_started);
+      }
+    }
+    if (saved_mode) setenv("REVAC_Q88_LIFT_SHARED_REFRESH",saved_mode,1);
+    else unsetenv("REVAC_Q88_LIFT_SHARED_REFRESH");
+    free(saved_mode);
+  }
+  if (revac_labrador_online_enabled()) {
+    const acc96_coeff_t saved = uav2.acc96_witness->left.coeff[0];
+    revac_public_state_t invalid_bound = public_state;
+    invalid_bound.acc96_witness_norm_sq_bound = 0.0L;
+    if (!require(!revac_uav_show_prove(&show, &invalid_bound, &uav2, msg, nonce),
+                 "async Show accepted invalid norm bound")) goto cleanup;
+    uav2.acc96_witness->left.coeff[0].limb[0] ^= UINT64_C(1);
+    const int rejected = !revac_uav_show_prove(&show, &public_state, &uav2, msg, nonce);
+    uav2.acc96_witness->left.coeff[0] = saved;
+    if (!require(rejected, "async Show accepted corrupted witness") ||
+        !require(revac_uav_memver_cache_prewarm(&uav2, &public_state),
+                 "async Show failed restoring checked witness")) goto cleanup;
+    puts("Q88_ASYNC_SHOW_REJECT_AND_RESTORE_PASS");
   }
   for (size_t lane = 0; lane < ACC96_LIMBS; lane++) {
     for (size_t coefficient = 0; coefficient < ACC96_N; coefficient++) {
@@ -740,15 +884,19 @@ int main(void) {
                          &public_state) &&
                      !revac_ta_export_memwitsync(
                          &ta, uav1.handle, &request,
-                         &sync_wire, &sync_wire_len) &&
-                     revac_ta_export_memwitsync(
-                         &ta, uav2.handle, &request,
                          &sync_wire, &sync_wire_len),
                  "TA q96 MemWitSync 生成失败")) {
       free(sync_wire);
       free(scratch);
       goto cleanup;
     }
+    phase_started = monotonic_seconds();
+    if (!require(revac_ta_export_memwitsync(&ta, uav2.handle, &request,
+                                          &sync_wire, &sync_wire_len),
+                 "TA q88 MemWitSync export 失败")) {
+      free(sync_wire); free(scratch); goto cleanup;
+    }
+    workflow_timing("ta_memwitsync_export", monotonic_seconds() - phase_started);
     sync_wire[REVAC_Q96_SYNC_WIRE_HEADER_BYTES] ^= UINT8_C(1);
     if (!require(!revac_q96_sync_response_unpack(
                      scratch, &response_seq, sync_wire, sync_wire_len,
@@ -778,6 +926,7 @@ int main(void) {
        TA endpoint.  The decoder verifies into scratch space and installs the
        witness atomically after clear q96 MemVer succeeds. */
     uav2.acc96_witness->left.coeff[0].limb[0] ^= UINT64_C(1);
+    phase_started = monotonic_seconds();
     if (!require(!revac_uav_memver_q96(&uav2, &public_state),
                  "q96 同步前的损坏 witness 意外通过") ||
         !require(revac_uav_recover_updates(
@@ -788,6 +937,7 @@ int main(void) {
                  "q96 MemWitSync 安装后 MemVer 失败")) {
       goto cleanup;
     }
+    workflow_timing("memwitsync_recovery_with_clear_checks", monotonic_seconds() - phase_started);
   }
   ok = 1;
   printf("q88 候选 D 实体接入测试通过（兼容 acc96 API）："
@@ -855,5 +1005,6 @@ cleanup:
   revac_uav_clear(&uav1);
   revac_ta_clear(&ta);
   arith_teardown();
+  if (ok) workflow_timing("full_test_wall_including_checks_and_cleanup", monotonic_seconds() - workflow_started);
   return ok ? 0 : 1;
 }

@@ -5,10 +5,21 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "randombytes.h"
 
-typedef struct {
+static uint64_t screen_hits, screen_fallbacks, screen_audits;
+__attribute__((destructor)) static void screen_report(void) {
+  const char *mode = getenv("REVAC_GAUSSIAN_CERTIFIED_SCREEN");
+  if ((mode && mode[0] == '2') || getenv("REVAC_GAUSSIAN_SCREEN_REPORT"))
+    fprintf(stderr, "[certified Gaussian screen] hits=%llu fallbacks=%llu reference_audits=%llu\n",
+      (unsigned long long)screen_hits, (unsigned long long)screen_fallbacks,
+      (unsigned long long)screen_audits);
+}
+
+typedef struct acc96_gaussian_mpfr_workspace {
+  struct acc96_gaussian_mpfr_workspace *screen;
   mpfr_t center_lo, center_hi;
   mpfr_t sigma_lo, sigma_hi;
   mpfr_t difference_lo, difference_hi;
@@ -17,6 +28,8 @@ typedef struct {
   mpfr_t temporary_lo, temporary_hi;
   mpfr_t pi_lo, pi_hi;
   mpfr_t alpha_lo, alpha_hi;
+  mpfr_t cached_variance;
+  int cached_variance_valid;
   mpz_t threshold_lo, threshold_hi;
   mpz_t uniform;
   char sigma_decimal[160];
@@ -53,6 +66,7 @@ static void workspace_set_precision(acc96_gaussian_mpfr_workspace_t *workspace,
 #undef SET_PRECISION
   workspace->precision = precision;
   workspace->sigma_decimal[0] = '\0';
+  workspace->cached_variance_valid = 0;
   mpfr_const_pi(workspace->pi_lo, MPFR_RNDD);
   mpfr_const_pi(workspace->pi_hi, MPFR_RNDU);
 }
@@ -68,7 +82,7 @@ static acc96_gaussian_mpfr_workspace_t *workspace_new(void) {
               workspace->probability_lo, workspace->probability_hi,
               workspace->temporary_lo, workspace->temporary_hi,
               workspace->pi_lo, workspace->pi_hi,
-              workspace->alpha_lo, workspace->alpha_hi,
+              workspace->alpha_lo, workspace->alpha_hi, workspace->cached_variance,
               (mpfr_ptr)0);
   mpz_inits(workspace->threshold_lo, workspace->threshold_hi,
             workspace->uniform, NULL);
@@ -81,9 +95,10 @@ static acc96_gaussian_mpfr_workspace_t *workspace_new(void) {
 
 static void workspace_free(acc96_gaussian_mpfr_workspace_t *workspace) {
   if (workspace == NULL) return;
+  workspace_free(workspace->screen);
   mpz_clears(workspace->uniform, workspace->threshold_hi,
              workspace->threshold_lo, NULL);
-  mpfr_clears(workspace->alpha_hi, workspace->alpha_lo,
+  mpfr_clears(workspace->cached_variance, workspace->alpha_hi, workspace->alpha_lo,
               workspace->pi_hi, workspace->pi_lo,
               workspace->temporary_hi, workspace->temporary_lo,
               workspace->probability_hi, workspace->probability_lo,
@@ -204,6 +219,7 @@ static int prepare_distribution_interval(
     acc96_gaussian_mpfr_workspace_t *workspace,
     const mpz_t center_numerator, const mpz_t center_denominator,
     const char *sigma_decimal) {
+  workspace->cached_variance_valid = 0;
   mpfr_set_z(workspace->temporary_lo, center_numerator, MPFR_RNDD);
   mpfr_set_z(workspace->temporary_hi, center_numerator, MPFR_RNDU);
   mpfr_set_z(workspace->difference_lo, center_denominator, MPFR_RNDD);
@@ -298,6 +314,9 @@ static int prepare_point_distribution(
     return 0;
   mpfr_set(workspace->center_lo, center, MPFR_RNDD);
   mpfr_set(workspace->center_hi, center, MPFR_RNDU);
+  if (workspace->cached_variance_valid && mpfr_equal_p(workspace->cached_variance, variance))
+    return 1;
+  workspace->sigma_decimal[0] = '\0'; /* Point alpha cannot serve a rational sigma cache. */
   mpfr_sqrt(workspace->sigma_lo, variance, MPFR_RNDD);
   mpfr_sqrt(workspace->sigma_hi, variance, MPFR_RNDU);
   if (mpfr_sgn(workspace->sigma_lo) <= 0) return 0;
@@ -307,6 +326,9 @@ static int prepare_point_distribution(
            workspace->temporary_hi, MPFR_RNDD);
   mpfr_div(workspace->alpha_hi, workspace->pi_hi,
            workspace->temporary_lo, MPFR_RNDU);
+  mpfr_set_prec(workspace->cached_variance, mpfr_get_prec(variance));
+  mpfr_set(workspace->cached_variance, variance, MPFR_RNDN); /* Exact same-precision copy. */
+  workspace->cached_variance_valid = 1;
   return 1;
 }
 
@@ -348,6 +370,20 @@ int acc96_gaussian_mpfr_sample_center_variance(
   radius += 2U;
   proposal_bound = 2U * radius + 1U;
 
+  const char *screen_mode = getenv("REVAC_GAUSSIAN_CERTIFIED_SCREEN");
+  const int use_screen = screen_mode == NULL || screen_mode[0] != '0';
+  const int audit_screen = screen_mode != NULL && screen_mode[0] == '2';
+  const int report_screen = audit_screen || getenv("REVAC_GAUSSIAN_SCREEN_REPORT") != NULL;
+  if (use_screen) {
+    if (workspace->screen == NULL) {
+      workspace->screen = workspace_new();
+      if (workspace->screen == NULL) goto cleanup;
+      workspace_set_precision(workspace->screen, 64);
+    }
+    if (!prepare_point_distribution(workspace->screen, center, variance))
+      goto cleanup;
+  }
+
   for (;;) {
     const uint32_t offset = uniform_below(workspace, proposal_bound);
     int64_t candidate;
@@ -361,6 +397,30 @@ int acc96_gaussian_mpfr_sample_center_variance(
     if (stats != NULL) stats->proposals++;
     workspace_random(workspace, random, sizeof(random));
     mpz_import(workspace->uniform, sizeof(random), 1, 1, 1, 0, random);
+    int screened = 0;
+    if (use_screen) {
+      /* RNDD/RNDU encloses the SAME exact p. A separated uniform value
+       * proves the decision; an overlapping interval falls back unchanged.
+       * Proposal support, source MPFR values and all RNG draws are original. */
+      if (acceptance_interval(workspace->screen, candidate,
+                              ACC96_GAUSSIAN_PROPOSAL_SCALE)) {
+        if (mpz_cmp(workspace->uniform, workspace->screen->threshold_lo) < 0)
+          screened = 1;
+        else if (mpz_cmp(workspace->uniform, workspace->screen->threshold_hi) >= 0)
+          screened = -1;
+      } /* A failed coarse enclosure also falls back to the original path. */
+      if (report_screen) __atomic_fetch_add(screened ? &screen_hits : &screen_fallbacks, 1, __ATOMIC_RELAXED);
+      if (screened != 0 && !audit_screen) {
+        if (stats != NULL && workspace->precision > stats->maximum_precision_bits)
+          stats->maximum_precision_bits = (uint32_t)workspace->precision;
+        if (screened == 1) {
+          if (stats != NULL) stats->certified_accepts++;
+          *sample = candidate; ok = 1; goto cleanup;
+        }
+        if (stats != NULL) stats->certified_rejects++;
+        continue;
+      }
+    }
     for (;;) {
       /* A uniform proposal has constant mass, so accepting with rho is
        * obtained by setting the existing envelope ratio M/weight to one. */
@@ -370,12 +430,16 @@ int acc96_gaussian_mpfr_sample_center_variance(
       if (stats != NULL && workspace->precision > stats->maximum_precision_bits)
         stats->maximum_precision_bits = (uint32_t)workspace->precision;
       if (mpz_cmp(workspace->uniform, workspace->threshold_lo) < 0) {
+        if (audit_screen && screened == -1) abort();
+        if (audit_screen && screened) __atomic_fetch_add(&screen_audits, 1, __ATOMIC_RELAXED);
         if (stats != NULL) stats->certified_accepts++;
         *sample = candidate;
         ok = 1;
         goto cleanup;
       }
       if (mpz_cmp(workspace->uniform, workspace->threshold_hi) >= 0) {
+        if (audit_screen && screened == 1) abort();
+        if (audit_screen && screened) __atomic_fetch_add(&screen_audits, 1, __ATOMIC_RELAXED);
         if (stats != NULL) stats->certified_rejects++;
         break;
       }

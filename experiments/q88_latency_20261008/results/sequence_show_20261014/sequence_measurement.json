@@ -1,0 +1,114 @@
+{
+  "sequence_0_initial": [
+    {
+      "run": 1,
+      "generation_seconds": 3.160039626,
+      "verification_seconds": 1.823231906,
+      "serialization_seconds": 0.0321768,
+      "accumulator_bytes": 192825,
+      "packet_bytes": 219391
+    },
+    {
+      "run": 2,
+      "generation_seconds": 3.276171744,
+      "verification_seconds": 1.769814998,
+      "serialization_seconds": 0.033568241,
+      "accumulator_bytes": 193081,
+      "packet_bytes": 217843
+    },
+    {
+      "run": 3,
+      "generation_seconds": 3.204814896,
+      "verification_seconds": 1.818493947,
+      "serialization_seconds": 0.032361053,
+      "accumulator_bytes": 193081,
+      "packet_bytes": 215207
+    }
+  ],
+  "sequence_1_first": [
+    {
+      "generation_seconds": 3.901840925,
+      "verification_seconds": 1.775424033,
+      "serialization_seconds": 0.039162688,
+      "accumulator_bytes": 193081,
+      "packet_bytes": 215247
+    }
+  ],
+  "sequence_repeated_shows": [
+    {
+      "sequence": 1,
+      "run": 1,
+      "generation_seconds": 3.526812509,
+      "verification_seconds": 1.835038468,
+      "accumulator_bytes": 192953,
+      "packet_bytes": 217864
+    },
+    {
+      "sequence": 1,
+      "run": 2,
+      "generation_seconds": 3.026004501,
+      "verification_seconds": 1.696094245,
+      "accumulator_bytes": 192889,
+      "packet_bytes": 218043
+    },
+    {
+      "sequence": 1,
+      "run": 3,
+      "generation_seconds": 3.541860119,
+      "verification_seconds": 1.867441773,
+      "accumulator_bytes": 193241,
+      "packet_bytes": 217491
+    },
+    {
+      "sequence": 2,
+      "run": 1,
+      "generation_seconds": 4.104992874,
+      "verification_seconds": 1.966831051,
+      "accumulator_bytes": 193081,
+      "packet_bytes": 217762
+    },
+    {
+      "sequence": 2,
+      "run": 2,
+      "generation_seconds": 3.420376875,
+      "verification_seconds": 1.698712572,
+      "accumulator_bytes": 193081,
+      "packet_bytes": 217849
+    },
+    {
+      "sequence": 2,
+      "run": 3,
+      "generation_seconds": 3.484624565,
+      "verification_seconds": 1.954087943,
+      "accumulator_bytes": 193209,
+      "packet_bytes": 217496
+    },
+    {
+      "sequence": 3,
+      "run": 1,
+      "generation_seconds": 3.691997185,
+      "verification_seconds": 1.787328564,
+      "accumulator_bytes": 193081,
+      "packet_bytes": 217854
+    },
+    {
+      "sequence": 3,
+      "run": 2,
+      "generation_seconds": 3.169421673,
+      "verification_seconds": 1.845249072,
+      "accumulator_bytes": 193241,
+      "packet_bytes": 217559
+    },
+    {
+      "sequence": 3,
+      "run": 3,
+      "generation_seconds": 2.994619161,
+      "verification_seconds": 1.68909239,
+      "accumulator_bytes": 193049,
+      "packet_bytes": 217847
+    }
+  ],
+  "layout_audit": [
+    "{'vectors': 142, 'backend_polynomials': 16448, 'approx_order': 'limb', 'approx_vectors': 109}"
+  ]
+}

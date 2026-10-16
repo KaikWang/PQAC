@@ -47,4 +47,15 @@ int revac_labrador_q96_prover_prewarm(
 int revac_labrador_q96_verifier_prewarm(
     const revac_public_state_t *public_state);
 
+/* Background preparation borrows state and UAV until finish. Caller must
+ * finish before Show, another update, mutation, or clear of either object.
+ * Foreground R_q opening setup precedes the background exact-lift/worker task.
+ * finish frees the job on success or failure; each job must be finished once.
+ * New Show openings/nonces/challenges are generated normally afterwards. */
+typedef struct revac_q88_prepare_async revac_q88_prepare_async_t;
+int revac_q88_prepare_async_start(revac_q88_prepare_async_t **job,
+    const revac_public_state_t *state, revac_uav_t *uav);
+int revac_q88_prepare_async_finish(revac_q88_prepare_async_t *job,
+                                  double *prepare_seconds);
+
 #endif

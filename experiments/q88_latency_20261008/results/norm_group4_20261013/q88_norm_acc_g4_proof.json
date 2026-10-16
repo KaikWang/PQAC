@@ -1,0 +1,25 @@
+{
+  "profile": "production CRT unchanged",
+  "fixture": "/tmp/q88bridge_full",
+  "prewarm_prover_seconds": 1.9086006954312325,
+  "prewarm_verifier_seconds": 5.027683846652508,
+  "clear_verify": true,
+  "pack_reload_verify": true,
+  "measurements": [
+    {
+      "generation_seconds": 3.2562091127038,
+      "verification_seconds": 1.9289489835500717,
+      "proof_bytes": 193273
+    },
+    {
+      "generation_seconds": 3.8910638466477394,
+      "verification_seconds": 1.9002915397286415,
+      "proof_bytes": 192601
+    },
+    {
+      "generation_seconds": 3.180888518691063,
+      "verification_seconds": 1.8943906649947166,
+      "proof_bytes": 192889
+    }
+  ]
+}

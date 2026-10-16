@@ -52,7 +52,202 @@ broadcast of an authenticated tail-context profile, context-assisted
 `MemWitUp`, offline context recovery through BML, fallback resynchronization
 by `MemWitSync`, and final verification.
 
+## Production compact CRT profile (2026-10-13)
+
+The production `revac_acc96_memver_worker.py` now defaults to the compact v3
+full-ring profile configured in `zk_lazer/revac_q88_profile.py`. It keeps the
+three original CRT factors, q19 same-handle binding, refresh-selector/product
+constraints and integer quotient/carry reconstruction. The new layout groups
+only original accumulator limbs, uses public coefficient bounds, a three-digit
+radix-3779 auxiliary representation, and six `scaled_Z = 4095 Z` bindings.
+Native Pack parameters and the weighted `beta0 < 2^80` implication are checked.
+Proof modulus, Gaussian distributions and repetition counts remain unchanged.
+
+Build the modified lowercase `lazer` native engine before running the worker:
+
+```sh
+make -C /path/to/pq_ac/lazer liblabrador38.so -j2
+cmake --build /path/to/pq_ac/OURS/code/entities/build-ours --target revocable_ac_demo -j2
+```
+
+Measure the actual complete Show packet (signature, accumulator proof, public
+instance and compression), including serialization in generation time:
+
+```sh
+PQAC_PYTHON=/path/to/sage/bin/python \
+PQAC_DEMO=/path/to/revocable_ac_demo \
+PQAC_RESULTS_DIR=/path/to/results \
+  bash tools/measure_q88_show.sh
+```
+
+The tool records accurate byte lengths, five fresh Shows, complete wire
+verification and the last public packet. The q88 entity test also reports
+`[q88 workflow measurement]` JSON records for Setup, key generation,
+registration, individual Issue calls, prover/verifier prewarm, Delete,
+DELTA6 witness update, LOCAL fallback and authenticated MemWitSync recovery.
+After revocation it generates and verifies a fresh complete Show packet using
+the updated witness. Set `PQAC_REPETITIONS=1` for a lifecycle run with one Show
+before revocation and one after update; the full test wall time includes the
+negative/regression checks and cleanup, and is not a minimal protocol latency.
+ Initialization, issuance and
+revocation are measured outside these online Show timings. The worker needs
+up to 1 GiB extra allocation cache; `REVAC_LABRADOR_SCRATCH_POOL_MIB=0` disables it.
+No PGO is used. The existing native build requires AVX512-capable hardware.
+
+Prover and verifier must deploy the same compiler layout and restart their
+resident workers after upgrading. The layout is bound into `static_profile_id`;
+old-layout Show proofs are not silently accepted under the new statement.
+Credential/accumulator CRT parameters and private wire encodings are unchanged.
+For the previous layout, set `REVAC_Q88_OPTIMIZED_PROFILE=0` in a clean environment
+on both workers, or restore the source/library archive in
+`/home/wkk/pq_ac/production_backups/q88_pre_v3_20261013` and rebuild the C demo.
+Passing the functional and parameter checks is not an independent cryptographic
+security certification. Detailed promotion measurements are in
+`../../experiments/q88_latency_20261008/results/production_v3_20261013/REPORT.md`.
+
+## Issue, sync and first preparation optimizations (2026-10-14)
+
+`acc96_gaussian_mpfr.c` uses a separate 64-bit directed-rounding screen for
+point center/variance Gaussian acceptance. Proposal support is computed by
+the original high-precision workspace, and the original 256-bit uniform
+variate is compared with certified bounds. Ambiguous or failed coarse bounds
+fall back to the existing MPFR acceptance loop. Source center/variance values,
+finite support, randomness and the rational Klein sampler remain unchanged.
+The workspace memoizes sigma/alpha only for exactly equal variance at the
+same precision; precision changes and rational sampling invalidate that cache.
+
+`REVAC_GAUSSIAN_CERTIFIED_SCREEN=0` disables screening;
+`=2` compares each screened decision with the high-precision path using the
+same candidate/uniform. The default enables the certified screen. Profiling
+counters are disabled normally; `REVAC_GAUSSIAN_SCREEN_REPORT=1` enables them.
+
+Public q88 SHAKE expansion now decodes 88-bit candidates in exact 32/32/24-bit
+words, retains the same original rejection test and computes all three CRT
+projections with bounded uint64 arithmetic. Immutable seeded public arrays
+are shared between prover/verifier caches within the same PP entry. Neither
+private witness data nor native statement ownership is shared by this change.
+`REVAC_Q88_PUBLIC_BANK_AUDIT=1` compares complete generated arrays with the
+old scalar implementation. No proof parameters or profile IDs change.
+
+Detailed before/after measurements and audit evidence:
+`../../experiments/q88_latency_20261008/results/lifecycle_opt_20261014/REPORT.md`.
+
+## Checked exact-lift reuse in complete Show (2026-10-14)
+
+The online prover checks the original aggregate norm bound and exact CRT
+quotient divisibility once, then reuses this checked lift in the bridge.
+The cache key binds witness, handle, accumulator, sequence, PP digest and
+norm bound; changed witness/bound entries are rejected. Update and public
+Clear MemVer verification retain their existing checks. The cache is local
+memory only and adds no wire fields. `REVAC_Q88_CHECKED_LIFT_CACHE=0` selects
+the previous precheck/lift path in a fresh process.
+
+Three fresh complete lifecycle measurements and a three-run cache-disabled
+control are recorded in
+`../../experiments/q88_latency_20261008/results/show_final_20261014/REPORT.md`.
+Updated full packet generation/verification averaged **4.153 / 1.593 s**;
+initial prewarmed Show averaged **3.251 / 1.757 s**. The complete Show target
+is still unmet. Eight-thread, projection-parallel and affinity candidates
+were discarded for lack of stable full Show improvement.
+
+## Parallel checked preflight in complete Show (2026-10-14)
+
+With `REVAC_Q88_ASYNC_PRECHECK=1` on the q88 online parallel path, MemVer preflight and checked exact-lift
+construction run in the existing accumulator proof thread, concurrently with
+signature proving. They must succeed before the worker receives a prove
+request. A Show succeeds only after both tasks complete successfully.
+Failed thread creation or failed accumulator jobs retain the same checked
+serial fallback. The signature thread reads credential fields; the proof
+thread exclusively updates the MemVer/lift caches. Packet fields, transcript,
+challenge sampling and proof parameters are unchanged.
+
+The default retains serial preflight. `REVAC_Q88_ASYNC_PRECHECK=1` enables
+the candidate; `=0` restores serial preflight for comparison. Full Show
+measurements did not show stable gains, so it is not promoted by default.
+Complete Show negative tests reject invalid norm bounds and corrupted witnesses,
+then restore the witness and checked cache. Normal update/sync checks are
+unchanged. Final measurements are recorded in
+`../../experiments/q88_latency_20261008/results/show_overlap_final_20261014/REPORT.md`.
+The experimental sparse-phi block aggregator passed functional audits but
+showed no stable end-to-end gain; it was removed from the production engine.
+
+## Background preparation and bulk exact lift (2026-10-14)
+
+`revac_q88_prepare_async_start/finish` prepares a new q88 accumulator state
+without creating a proof. The foreground constructs the temporary q19 opening;
+the background owns integer/CRT scratch and installs the complete new witness
+in the resident worker. The state/UAV are borrowed and must remain alive and
+unchanged until finish; finish before Show, another update, mutation or clear.
+Every subsequent Show generates fresh nonce/opening/masks/challenges normally.
+The demo enables post-update preparation with
+`REVAC_Q88_POST_UPDATE_PREWARM=1` and reports its wall/task time separately.
+It immediately joins for an honest update-to-ready cost; applications may use
+idle time between start and finish.
+
+Resident prover preparation now bypasses the verifier-only early return and
+passes `prepare_prover` by keyword to the full-ring compiler. This ensures a
+changed accumulator witness is actually loaded before compact reuse. Set
+`REVAC_Q88_PREPARE_AUDIT=1` to Clear Verify the prepared native witness.
+
+Exact lift now uses exact polynomial shift/truncate/sub/add modulo `X^4096+1`
+and reuses converted rhs polynomials for scalar contributions. Original
+aggregate norm, tag/window and three CRT divisibility checks remain intact.
+`REVAC_Q88_BULK_LIFT=0` uses the reference coefficient loop, `=1` (default)
+uses the bulk path, and `=2` audits each result against the reference.
+
+Three fresh complete flows averaged initial Show **3.246 / 1.657 s**,
+post-update preparation **0.811 s**, and subsequent complete Show
+**3.123 / 1.719 s**. Preparation plus generation averaged **3.934 s**;
+UAV DELTA6 update plus preparation plus generation averaged **3.971 s**.
+These are measured samples, not worst-case guarantees, and exclude TA revoke
+work/network RTT from the last sum. The 3 s / 1.5 s target remains unmet.
+No native Verify speedup was retained; the folded-center candidate passed
+functional audits but had no stable measured benefit and was reverted.
+
+Detailed evidence and sizes:
+`../../experiments/q88_latency_20261008/results/background_bulk_fixed_20261014/REPORT.md`.
+
+## Shared CRT exact-lift preparation (2026-10-14)
+
+Exact lift now expands each refresh matrix once per call and converts common
+witness polynomials once for all three CRT lanes. The shared data is immutable
+within that call and freed before return. All original checks and exact integer
+operations remain. `REVAC_Q88_LIFT_SHARED_REFRESH=3` is the default; `=0` restores
+the reference path, `=1` shares only refresh expansion, `=2` audits that path,
+and `=4` audits the full shared path against the reference output and status.
+`REVAC_Q88_LIFT_BENCHMARK=1` enables the optional interleaved demo diagnostic.
+
+Five fixed-input calls per mode averaged **0.363 / 0.284 s** for reference/full
+sharing. Three fresh complete flows averaged post-update preparation
+**0.691 s**, then Show **3.029 / 1.701 s**; preparation plus generation was
+**3.719 s**. Initial Show averaged **3.562 / 1.682 s**, including one generation
+sample at **4.059 s**. Native Pack algorithms were unchanged in this cohort;
+online timing differences include randomness/load, and the 3 s / 1.5 s target
+remains unmet. Public sparse-rotation and zero-RHS candidates were tested and
+removed because they showed no stable benefit. Full measurements, sizes,
+audits and comparison with the preceding cohort:
+`../../experiments/q88_latency_20261008/results/shared_lift_final_20261014/REPORT.md`.
+
 ## q88 candidate D accumulator
+
+Research note (2026-10-16): witness refresh age, the C norm gate, the proof
+coefficient budget, and the Delete counter are distinct limits. The fixed-pp
+randomized-refresh derivation and Appendix E reduction audit are recorded in
+`../../experiments/q88_refresh_bounds_20261016/RESEARCH.md`. It proves a
+conditional 50000-update correctness envelope after each checked fresh witness;
+it does not certify repeated-refresh lifetime security or remove production
+limits.
+
+Fresh-witness admission now enforces `ACC96_FRESH_COEFF_BOUND = 2^30-1`
+on the 24 head polynomials, ternary right/refresh-z vectors, a fixed unit tag,
+and canonical CRT residues. The secure sampler clears its output and fails
+on a violation; Add, TA MemWitSync and signed sync response encoding/decoding
+also enforce this check. There is no implicit retry or coefficient clipping.
+This check applies only to fresh issuance/synchronization, never to ordinary
+updated witnesses. It establishes the bound for successfully admitted fresh
+witnesses; the sampler's failure probability and repeated-refresh security
+remain separate proof obligations. Evidence:
+`../../experiments/q88_refresh_bounds_20261016/FRESH_GATE.md`.
 
 The accumulator uses the three NTT-prime CRT factors
 `1073692673`, `536813569`, and `536690689`, whose product is the 88-bit modulus

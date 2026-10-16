@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-16",
+  "environment": "local WSL",
+  "targeted_ctests_passed": 5,
+  "native_pack_show_passed": false,
+  "remote_deployed": false,
+  "sampler_retry_policy": "one attempt; explicit failure; output zeroed",
+  "sha256": {
+    "code/entities/common/core/include/acc96_relation.h": "95a7a17a845b76ba195c37e5f217c0981b264d36f6e0d9ee3359169e7f2516f2",
+    "code/entities/common/core/include/acc96_proof_layout.h": "b039e1d558a38ac1e4a865b2566d61af79bed3f0c32403f149545d4b89057711",
+    "code/entities/common/core/include/acc96_sampleleft.h": "09362fc8d29bc5999d06d3ceae29055bd21ec5606bf2c9240a226ba089eda703",
+    "code/entities/common/core/src/acc96_relation.c": "2951a70353894eff5f878f4f761006c64f28f23c973af0819317714d7a0be75a",
+    "code/entities/common/core/src/acc96_sampleleft.c": "69f1bcdcbea3a2af6277d853db7b6a3932885ccb02cb89c9d258b75e7e7802f9",
+    "code/entities/common/core/src/acc96_accumulator.c": "718c5ac5da31960d73cdd7f8d70344efd25ffb36d196bb46eeb9943dd50b9e77",
+    "code/entities/common/revac_sync.c": "f36c3b85f2c4fc97cfec64fa27c36992ab45eb402130055df443c49ee214af68",
+    "code/entities/ta/revac_ta.c": "225f5906206caf57eaf0c89cd21efbf5ef87a9b6735d3a63518f649270cc135a",
+    "code/entities/test/revac_acc96_fresh_gate_demo.c": "9c4040f2aa29bc2ce5e0edbe419c8903395801f69bcfa17901a03fe741149db8",
+    "code/entities/test/revac_acc96_fresh_sync_demo.c": "9aa327743a02d602886ae98edeb2667aeaf5aa42c6f3111caa97c59a8d99c08e",
+    "code/entities/CMakeLists.txt": "7955008ef5eac8dcab93145c67094f85351a99dcf2cc4741be476f52de857929",
+    "experiments/q88_refresh_bounds_20261016/FRESH_GATE.md": "de34364d3589c45e0941a3199493af39dd89d52e1a532de5ab2f5a8397094475",
+    "experiments/q88_refresh_bounds_20261016/bounds_with_fresh_gate.json": "52ecc5e01417ba9dbf41bf012d5a8537168baa220cdd2ffc88fff2536641d277",
+    "experiments/q88_refresh_bounds_20261016/fresh_gate_validation/ctest.log": "ea9de3add2bd138820ed189db1c9074f9b74be1a3b18af1a80a5be8268e4a178",
+    "experiments/q88_refresh_bounds_20261016/fresh_gate_validation/signed_sync.log": "187358058d73e513de9018a2528815c869c0b63f6367b4d83867aa9374ffcd65"
+  }
+}

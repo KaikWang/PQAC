@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-16",
+  "host": "local WSL",
+  "production_changes": false,
+  "pack_show_run": false,
+  "large_scale_deletion_run": false,
+  "true_deletions_in_clear_audit": 2,
+  "sampled_target_witnesses": 3,
+  "hashes": {
+    "experiments/q88_refresh_bounds_20261016/audit_bounds.py": "3e4f998a45bc0f3be8d35c72d3dce813765b48416afd057a881ac98f6c6f9ad5",
+    "experiments/q88_refresh_bounds_20261016/bounds.json": "ed05e5df7c05e34a7127dd747be6e4a587387b5ac477d98a6f69582c5013a56a",
+    "experiments/q88_refresh_bounds_20261016/fresh_witness_audit.c": "d7f51a9d8fbeac399be7d7f1c7b54809d45b97596a5c3c30c6873b84fcf5f820",
+    "experiments/q88_refresh_bounds_20261016/run_clear_audit.sh": "ffc9b26d860f9bc018269b16bbad6207a39a6efac69cb302c4b72b200563d3c0",
+    "experiments/q88_refresh_bounds_20261016/clear_audit.log": "42d3ab6bbdf7444b703923636a1d696df39a2c304d5c2020b61d36885116253a",
+    "code/entities/build-ours/librevac_entities_core.a": "a793a94e51a19bf33b3df83c07c7b7a0c292b20f893b4b4240fc1f753a89e1d5",
+    "/home/wkk/pq_ac/Latice-Accumulator/papers/eprint-2025-1099.pdf": "da5d8e3b5094f3ea1f36c822daa42404a20b0bf849edd7db64ce02c462bc351d",
+    "/tmp/pqac_truncated_JS25_20261016.pdf": "8e39bd6e1963a600f1c5c217f52c8ce26d690aa784ef9fb8059f9dda4593d6c3",
+    "experiments/q88_refresh_bounds_20261016/RESEARCH.md": "b2bb92c722fad519132bc2f26d72efc039d49c5d9da65134017f97079f964922"
+  }
+}

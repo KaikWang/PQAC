@@ -1,0 +1,115 @@
+{
+  "status": "conditional_correctness_bound_and_security_reduction_audit_only",
+  "security_certified": false,
+  "production_changed": false,
+  "q": 309333912899981927159406593,
+  "ring_degree": 4096,
+  "handle_bits": 24,
+  "fresh_condition": "all 24 head polynomial coefficients <= 2^30-1 in absolute value; right/z ternary; tag=1",
+  "fresh_condition_enforced_by_sampler": false,
+  "fresh_coefficient_cap": 1073741823,
+  "delta_coefficient_bound": 4155261149184,
+  "delta_norm_squared_exact": 9759682314537677664042828521472,
+  "delta_norm": "3124049025629667.94169408830014675109281728572020278606056886370437376252962728628178029169",
+  "fresh_norm_squared_exact_under_condition": 113336795377765253308545,
+  "fresh_norm_under_condition": "336655306474.983776258876805421354711720002024264126731621575536648434225254084719714679408",
+  "runtime_beta_squared_exact": 11417981541647679048466287755595961091061972992,
+  "runtime_beta": "106854955625126151883567.692236820548557891799364344697476973163942176098867631120372209419",
+  "norm_exponents": {
+    "runtime_header": 153,
+    "sampler_json": 148,
+    "profile_manifest": 153,
+    "consistent": false
+  },
+  "l2_only_capacity_under_fresh_condition": 34203994,
+  "l2_only_capacity_using_sampler_json_gate": 6046469,
+  "proof_coefficient_cap": 207763058532941823,
+  "proof_coefficient_only_capacity_under_fresh_condition": 50000,
+  "current_runtime_deletion_counter_cap": 50000,
+  "ages": [
+    {
+      "age_since_last_refresh": 0,
+      "norm_upper_bound": "336655306474.983776258876805421354711720002024264126731621575536648434225254084719714679408",
+      "log2_norm_upper_bound": 38.292481249016966,
+      "runtime_l2_budget_holds": true,
+      "right_coefficient_upper_bound": 1,
+      "proof_coefficient_budget_holds": true
+    },
+    {
+      "age_since_last_refresh": 50000,
+      "norm_upper_bound": "156202451618138703559.688191266214360062218997730141327292569916840263663129798539343099304",
+      "log2_norm_upper_bound": 67.08197899469432,
+      "runtime_l2_budget_holds": true,
+      "right_coefficient_upper_bound": 207763057459200001,
+      "proof_coefficient_budget_holds": true
+    },
+    {
+      "age_since_last_refresh": 56245,
+      "norm_upper_bound": "175712137783195979855.567772700630820636862947052807726240822470674077810127320942172817226",
+      "log2_norm_upper_bound": 67.25177575053233,
+      "runtime_l2_budget_holds": true,
+      "right_coefficient_upper_bound": 233712663335854081,
+      "proof_coefficient_budget_holds": false
+    },
+    {
+      "age_since_last_refresh": 100000,
+      "norm_upper_bound": "312404902899622100644.392606273551914703083283740280630321013102058951789611162853432113889",
+      "log2_norm_upper_bound": 68.08197899313964,
+      "runtime_l2_budget_holds": true,
+      "right_coefficient_upper_bound": 415526114918400001,
+      "proof_coefficient_budget_holds": false
+    }
+  ],
+  "conditional_sampler_tail_diagnostic": {
+    "certified": false,
+    "caution": "JS25 Theorem 4.2 gives a K-pushforward distribution, not automatically a Gaussian on the collapsed output; this tail needs a separate argument",
+    "assumption": "uniformly for every residual/history, head coordinate tail <= 2 exp(-pi*u^2) with output width <= sigma_max; implementation distribution error added separately",
+    "sigma_max": "38192.6733961297587000127110817049696553275696406060030814855984342184118992135691258703799",
+    "head_coordinates": 98304,
+    "tail_u_for_union_bound_2_neg128": "5.66755904905700027300094465023616354504766802811538817398715048140382942888324500453551003",
+    "head_coefficient_cap": 216460,
+    "fresh_norm": "67867718.3690517844124417180344316288682927065933449159579476072983378960561800639000528395",
+    "fresh_gate_tail_exponent_without_implementation_error": "3582317136.01352263685604773201251537046918116075216884236980514867856835612913171671103249"
+  },
+  "historical_screen": {
+    "theorem": "Theorem 4.3, not randomized Appendix E",
+    "log2_beta0": 76.77987581708601,
+    "log2_beta1": 87.82947879337704,
+    "log2_q_over_beta1": 0.1698166813556412,
+    "release_ready": false
+  },
+  "appendix_e_formal_dimension_diagnostic": {
+    "valid_instantiation_proved": false,
+    "s_choice": "T for arithmetic diagnostic only; not actual sampler widths",
+    "theta1": 601.3256843546451,
+    "theta2": 1100.3950585071389,
+    "extraction_factor": 77578.8178038445,
+    "rows": [
+      {
+        "lifetime_deletions": 50000,
+        "log2_T": 67.08197899158496,
+        "log2_beta1_case1": 93.04855802271351,
+        "log2_beta1_case2": 93.99518963397986,
+        "log2_q": 87.99929547473268,
+        "case2_s_ge_T_for_production_max_width": false
+      },
+      {
+        "lifetime_deletions": 100000,
+        "log2_T": 68.08197899158496,
+        "log2_beta1_case1": 94.04855802271351,
+        "log2_beta1_case2": 94.99518963397986,
+        "log2_q": 87.99929547473268,
+        "case2_s_ge_T_for_production_max_width": false
+      }
+    ]
+  },
+  "source_sha256": {
+    "sampler": "c36025690d5c60d1e2fc7d651cb892d25a9f3bad47b61c39255ff5a00b019d9c",
+    "profile": "c30d3864540fde9fdab0107742f0b15e70026581564d4e73e2a351a420b0f029",
+    "header": "5165652406f93abcda2de2b0ad972c7a7ab28e47adb13b4a214e9790bac4c92c",
+    "eval": "3a29b4d939f27182f0121a7f23d307b0cf5899051042ce5760a289cc63d08f37",
+    "layout": "9c0f144fdf398e1cc61c214d53950bd25c30ef54fee98ef54d65cf2ff6c3ccd2",
+    "sampleleft": "55c614c60ca04413e8cecca9f983a6277c93a59d2cf98ad703c933036ec6f953",
+    "relation": "f55712262bd44fa0c8e9f3b2c5816bd0cf3ac80e20c8b26951797292d014c386"
+  }
+}

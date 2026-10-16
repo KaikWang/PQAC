@@ -429,7 +429,8 @@ int revac_q96_sync_response_pack(
   *wire_len = 0;
   if (request == NULL || accumulator == NULL || witness == NULL || ctx == NULL ||
       ta_sk == NULL || ta_pk == NULL || acc_seq < request->last_seq ||
-      REVAC_Q96_SYNC_WITNESS_BYTES > UINT32_MAX) return 0;
+      REVAC_Q96_SYNC_WITNESS_BYTES > UINT32_MAX ||
+      !acc96_relation_fresh_witness_check(witness, ctx)) return 0;
   out = calloc(total, 1);
   if (out == NULL) return 0;
   witness_bytes = out + REVAC_Q96_SYNC_WIRE_HEADER_BYTES +
@@ -523,6 +524,7 @@ int revac_q96_sync_response_unpack(
   decoded = calloc(1, sizeof(*decoded));
   if (decoded == NULL) return 0;
   ok = q96_unpack_witness(decoded, witness_bytes) &&
+       acc96_relation_fresh_witness_check(decoded, public_state->acc96_ctx) &&
        acc96_relation_memver(public_state->acc96_pp,
                              public_state->acc96_acc, request->handle,
                              decoded,

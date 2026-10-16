@@ -1,0 +1,41 @@
+{
+  "profile": "production CRT isolated dimension v3",
+  "norm_group_size": 16,
+  "approx_order": "limb",
+  "fixture": "/tmp/q88_show_updated_fixture",
+  "compact_witness_count": 4,
+  "compact_witness_radix": 32767,
+  "tight_witness_top": true,
+  "tight_aggregate_norm": true,
+  "aggregate_radix": 3779,
+  "preserve_aux_requirement": true,
+  "mixed_aux_top": true,
+  "scaled_refresh_z": true,
+  "dch_cost_selection": false,
+  "scalar_handle_exact_norm": true,
+  "tight_refresh_norm": true,
+  "batch_split_mode": "1",
+  "fused_ling_mode": "1",
+  "prewarm_prover_seconds": 1.3451649025082588,
+  "prewarm_verifier_seconds": 2.159674860537052,
+  "clear_verify": true,
+  "pack_reload_verify": true,
+  "negative_checks": false,
+  "measurements": [
+    {
+      "generation_seconds": 3.0332389026880264,
+      "verification_seconds": 1.6065052524209023,
+      "proof_bytes": 193081
+    },
+    {
+      "generation_seconds": 2.815672591328621,
+      "verification_seconds": 1.6407116800546646,
+      "proof_bytes": 192825
+    },
+    {
+      "generation_seconds": 2.7347516268491745,
+      "verification_seconds": 1.6837722063064575,
+      "proof_bytes": 193305
+    }
+  ]
+}

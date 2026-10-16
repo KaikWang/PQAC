@@ -459,7 +459,9 @@ int acc96_sampleleft_secure(acc96_relation_witness_t *out,
   }
   acc96_poly_zero(&out->tag);
   acc96_coeff_from_u128(&out->tag.coeff[0], 1);
-  ok = 1;
+  /* One attempt only: return failure and clear out on a gate violation.
+     Do not silently resample or clamp a coefficient. */
+  ok = acc96_relation_fresh_witness_check(out, ctx);
 
 arb_cleanup:
   arb_clear(center_scale);

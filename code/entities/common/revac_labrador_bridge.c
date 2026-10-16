@@ -1,4 +1,5 @@
 #include "revac_labrador_bridge.h"
+#include "../uav/revac_uav.h"
 
 #include "arith.h"
 #include "fips202.h"
@@ -1348,16 +1349,15 @@ cleanup:
   return ok;
 }
 
-int revac_labrador_q96_prover_prewarm(
-    const revac_public_state_t *public_state, const revac_uav_t *uav) {
+static int revac_q96_prover_prewarm_link(
+    const revac_public_state_t *public_state, const revac_uav_t *uav,
+    const uint8_t *link_wire) {
   acc96_exact_lift_t *lift = NULL;
-  uint8_t *public_wire = NULL, *prover_wire = NULL, *link_wire = NULL;
+  uint8_t *public_wire = NULL, *prover_wire = NULL;
   uint8_t *reply = NULL;
   size_t reply_len = 0;
   unsigned lift_bits = 0;
   revac_worker_buf_t dynamic = {0};
-  poly_q_vec_d commitment, link_randomness[2];
-  int commitment_initialized = 0;
   int cache_hit = 0;
   int ok = 0;
 
@@ -1367,20 +1367,15 @@ int revac_labrador_q96_prover_prewarm(
       public_state->acc96_acc == NULL || uav->acc96_witness == NULL ||
       uav->last_seq != public_state->acc96_seq)
     return 0;
-  poly_q_vec_d_init(commitment);
-  for (size_t i = 0; i < 2; i++) poly_q_vec_d_init(link_randomness[i]);
-  commitment_initialized = 1;
-  revac_same_handle_commitment_generate(
-      commitment, link_randomness, public_state, uav->handle);
   lift = malloc(sizeof(*lift));
   public_wire = malloc(ACC96_LABRADOR_PUBLIC_BYTES);
   prover_wire = malloc(ACC96_LABRADOR_PROVER_BYTES);
-  link_wire = malloc(REVAC_Q96_LINK_WIRE_BYTES);
   if (lift == NULL || public_wire == NULL || prover_wire == NULL ||
       link_wire == NULL ||
-      !acc96_memver_exact_lift(lift, &lift_bits, public_state->acc96_pp,
-                               public_state->acc96_acc, uav->handle,
-                               uav->acc96_witness, public_state->acc96_ctx) ||
+      !(revac_uav_q88_cached_lift_copy(lift, &lift_bits, uav, public_state) ||
+        acc96_memver_exact_lift(lift, &lift_bits, public_state->acc96_pp,
+            public_state->acc96_acc, uav->handle, uav->acc96_witness,
+            public_state->acc96_ctx)) ||
       !acc96_labrador_public_encode(
           public_wire, ACC96_LABRADOR_PUBLIC_BYTES,
           public_state->acc96_public_seed, public_state->acc96_pp) ||
@@ -1388,9 +1383,6 @@ int revac_labrador_q96_prover_prewarm(
           prover_wire, ACC96_LABRADOR_PROVER_BYTES,
           public_state->acc96_seq, uav->handle, public_state->acc96_acc,
           uav->acc96_witness, lift, public_state->acc96_ctx) ||
-      !revac_q96_link_wire_encode(
-          link_wire, REVAC_Q96_LINK_WIRE_BYTES, public_state, uav->handle,
-          link_randomness, commitment) ||
       !revac_worker_buf_append(
           &dynamic, prover_wire, ACC96_LABRADOR_PROVER_BYTES) ||
       !revac_worker_buf_append(
@@ -1406,14 +1398,88 @@ int revac_labrador_q96_prover_prewarm(
 cleanup:
   free(reply);
   revac_worker_buf_clear(&dynamic);
-  free(link_wire);
   free(prover_wire);
   free(public_wire);
   free(lift);
-  if (commitment_initialized) {
-    for (size_t i = 0; i < 2; i++) poly_q_vec_d_clear(link_randomness[i]);
-    poly_q_vec_d_clear(commitment);
+  return ok;
+}
+
+static int revac_q96_prepare_link(uint8_t *wire,
+    const revac_public_state_t *state, const revac_uav_t *uav) {
+  poly_q_vec_d commitment, randomness[2];
+  if (!wire || !state || !uav || !state->ta_pk ||
+      state->acc_profile != REVAC_ACC_PROFILE_Q96 || !state->acc96_ctx ||
+      !state->acc96_pp || !state->acc96_acc || !uav->acc96_witness ||
+      uav->last_seq != state->acc96_seq) return 0;
+  poly_q_vec_d_init(commitment);
+  for (size_t i=0;i<2;i++) poly_q_vec_d_init(randomness[i]);
+  revac_same_handle_commitment_generate(commitment,randomness,state,uav->handle);
+  int ok=revac_q96_link_wire_encode(wire,REVAC_Q96_LINK_WIRE_BYTES,state,
+                                   uav->handle,randomness,commitment);
+  for (size_t i=0;i<2;i++) poly_q_vec_d_clear(randomness[i]);
+  poly_q_vec_d_clear(commitment);
+  return ok;
+}
+
+int revac_labrador_q96_prover_prewarm(
+    const revac_public_state_t *state, const revac_uav_t *uav) {
+  uint8_t *wire=malloc(REVAC_Q96_LINK_WIRE_BYTES);
+  const int ok=revac_labrador_online_enabled() &&
+      revac_q96_prepare_link(wire,state,uav) &&
+      revac_q96_prover_prewarm_link(state,uav,wire);
+  free(wire);
+  return ok;
+}
+
+struct revac_q88_prepare_async {
+  pthread_t thread;
+  const revac_public_state_t *state;
+  revac_uav_t *uav;
+  uint8_t *link_wire;
+  uint32_t sequence;
+  double started, finished;
+  int ok;
+};
+
+static void *revac_q88_prepare_main(void *opaque) {
+  revac_q88_prepare_async_t *job=opaque;
+  job->ok=revac_uav_memver_cache_prewarm(job->uav,job->state) &&
+      revac_q96_prover_prewarm_link(job->state,job->uav,job->link_wire);
+  job->finished=revac_labrador_monotonic_seconds();
+  return NULL;
+}
+
+int revac_q88_prepare_async_start(revac_q88_prepare_async_t **out,
+    const revac_public_state_t *state, revac_uav_t *uav) {
+  if (!out) return 0;
+  *out=NULL;
+  if (!revac_labrador_online_enabled() || !state || !uav ||
+      state->acc_profile!=REVAC_ACC_PROFILE_Q96 ||
+      !uav->issued || uav->last_seq!=state->acc96_seq) return 0;
+  revac_q88_prepare_async_t *job=calloc(1,sizeof(*job));
+  if (!job) return 0;
+  job->started=revac_labrador_monotonic_seconds();
+  job->state=state;job->uav=uav;job->sequence=state->acc96_seq;
+  job->link_wire=malloc(REVAC_Q96_LINK_WIRE_BYTES);
+  /* Construct the R_q opening before spawning: the background task owns
+     exact-integer/CRT scratch and worker I/O only, never global R_q scratch. */
+  if (!revac_q96_prepare_link(job->link_wire,state,uav) ||
+      pthread_create(&job->thread,NULL,revac_q88_prepare_main,job)!=0) {
+    free(job->link_wire);free(job);return 0;
   }
+  *out=job;
+  return 1;
+}
+
+int revac_q88_prepare_async_finish(revac_q88_prepare_async_t *job,
+                                  double *prepare_seconds) {
+  if (!job) return 0;
+  pthread_join(job->thread,NULL);
+  if (prepare_seconds) *prepare_seconds=job->finished-job->started;
+  acc96_exact_lift_t *checked=malloc(sizeof(*checked));
+  const int ok=job->ok && job->sequence==job->state->acc96_seq && checked &&
+      revac_uav_q88_cached_lift_copy(checked,NULL,job->uav,job->state);
+  free(checked);free(job->link_wire);free(job);
   return ok;
 }
 
@@ -1495,6 +1561,13 @@ static void *revac_labrador_prove_async_main(void *opaque) {
   revac_labrador_prove_async_t *job = opaque;
 
   if (job->q96_mode) {
+    const char *mode = getenv("REVAC_Q88_ASYNC_PRECHECK");
+    if (mode != NULL && mode[0] == '1') {
+      const double checked_started = revac_labrador_monotonic_seconds();
+      if (!revac_uav_memver_cache_prewarm(job->uav, job->public_state))
+        return NULL;
+      revac_labrador_print_timing("异步 MemVer 检查与 checked lift", checked_started);
+    }
     job->request_ok = revac_labrador_q96_memver_prove(
         &job->q96_proof, job->public_state, job->uav,
         job->link_randomness);
@@ -1888,10 +1961,10 @@ int revac_labrador_q96_memver_prove(
     lift = malloc(sizeof(*lift));
     prover_wire = malloc(ACC96_LABRADOR_PROVER_BYTES);
     if (lift == NULL || prover_wire == NULL ||
-        !acc96_memver_exact_lift(lift, &lift_bits, public_state->acc96_pp,
-                                 public_state->acc96_acc, uav->handle,
-                                 uav->acc96_witness,
-                                 public_state->acc96_ctx) ||
+        !(revac_uav_q88_cached_lift_copy(lift, &lift_bits, uav, public_state) ||
+        acc96_memver_exact_lift(lift, &lift_bits, public_state->acc96_pp,
+            public_state->acc96_acc, uav->handle, uav->acc96_witness,
+            public_state->acc96_ctx)) ||
         !acc96_labrador_prover_encode(
             prover_wire, ACC96_LABRADOR_PROVER_BYTES,
             public_state->acc96_seq, uav->handle, public_state->acc96_acc,
@@ -1921,10 +1994,10 @@ int revac_labrador_q96_memver_prove(
   lift = malloc(sizeof(*lift));
   prover_wire = malloc(ACC96_LABRADOR_PROVER_BYTES);
   if (lift == NULL || prover_wire == NULL ||
-      !acc96_memver_exact_lift(lift, &lift_bits, public_state->acc96_pp,
-                               public_state->acc96_acc, uav->handle,
-                               uav->acc96_witness,
-                               public_state->acc96_ctx) ||
+      !(revac_uav_q88_cached_lift_copy(lift, &lift_bits, uav, public_state) ||
+        acc96_memver_exact_lift(lift, &lift_bits, public_state->acc96_pp,
+            public_state->acc96_acc, uav->handle, uav->acc96_witness,
+            public_state->acc96_ctx)) ||
       !acc96_labrador_prover_encode(
           prover_wire, ACC96_LABRADOR_PROVER_BYTES,
           public_state->acc96_seq, uav->handle, public_state->acc96_acc,

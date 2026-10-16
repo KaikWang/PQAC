@@ -50,6 +50,8 @@ int revac_uav_apply_update_q96_delta6(
     size_t supplied_layers, size_t *applied_layers, int *used_local);
 int revac_uav_memver_q96(const revac_uav_t *uav,
                          const revac_public_state_t *public_state);
+int revac_uav_q88_cached_lift_copy(acc96_exact_lift_t *out, unsigned *maximum_abs_bits,
+    const revac_uav_t *uav, const revac_public_state_t *public_state);
 int revac_uav_memver_cache_prewarm(revac_uav_t *uav,
                                    const revac_public_state_t *public_state);
 

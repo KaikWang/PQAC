@@ -1,0 +1,145 @@
+{
+  "profile": "production complete q88 CRT compact v3",
+  "server": "autodl-pqa11",
+  "generation_includes_serialization": true,
+  "excludes_initialization_issue_and_revocation": true,
+  "measurements": [
+    {
+      "run": 1,
+      "generation_seconds": 3.148497798,
+      "verification_seconds": 1.761798054,
+      "serialization_seconds": 0.03413178,
+      "accumulator_bytes": 192825,
+      "packet_bytes": 219421
+    }
+  ],
+  "accumulator_worker_generation_s": [
+    3.052073,
+    3.447694
+  ],
+  "accumulator_worker_verification_s": [
+    1.744086,
+    1.54604
+  ],
+  "workflow_measurements": [
+    {
+      "phase": "runtime_initialization",
+      "seconds": 0.001422569
+    },
+    {
+      "phase": "ta_setup",
+      "seconds": 3.884881228
+    },
+    {
+      "phase": "keygen_3uav_1gcs_and_test_identity_selection",
+      "seconds": 0.010343142
+    },
+    {
+      "phase": "registration_3uav_1gcs",
+      "seconds": 0.000108927
+    },
+    {
+      "phase": "issue_uav1",
+      "seconds": 3.446904324
+    },
+    {
+      "phase": "issue_uav2",
+      "seconds": 3.304485701
+    },
+    {
+      "phase": "issue_uav_local",
+      "seconds": 3.236276023
+    },
+    {
+      "phase": "prover_prewarm",
+      "seconds": 2.821228094
+    },
+    {
+      "phase": "verifier_prewarm",
+      "seconds": 1.451627806
+    },
+    {
+      "phase": "ta_tail4_prefetch",
+      "seconds": 0.494037233
+    },
+    {
+      "phase": "uav_tail4_prefetch_auth_cache",
+      "seconds": 0.004991762
+    },
+    {
+      "phase": "ta_delete_delta6_and_compatible_tail4",
+      "seconds": 1.175201952
+    },
+    {
+      "phase": "ta_update_manifest_export",
+      "seconds": 0.000105426
+    },
+    {
+      "phase": "uncached_local_update_with_clear_verify",
+      "seconds": 1.312334977
+    },
+    {
+      "phase": "uav_delta6_update",
+      "seconds": 0.036496356
+    },
+    {
+      "phase": "post_update_show_generation_including_serialization",
+      "seconds": 4.214399226
+    },
+    {
+      "phase": "post_update_show_wire_verification",
+      "seconds": 1.555627719
+    },
+    {
+      "phase": "ta_memwitsync_export",
+      "seconds": 3.365470164
+    },
+    {
+      "phase": "memwitsync_recovery_with_clear_checks",
+      "seconds": 4.620912753
+    },
+    {
+      "phase": "full_test_wall_including_checks_and_cleanup",
+      "seconds": 44.261667013
+    }
+  ],
+  "post_update_show": [
+    {
+      "generation_seconds": 4.214399226,
+      "verification_seconds": 1.555627719,
+      "serialization_seconds": 0.033385009,
+      "accumulator_bytes": 193305,
+      "packet_bytes": 217230
+    }
+  ],
+  "mean": {
+    "generation_seconds": 3.148497798,
+    "verification_seconds": 1.761798054,
+    "serialization_seconds": 0.03413178,
+    "accumulator_bytes": 192825,
+    "packet_bytes": 219421
+  },
+  "range": {
+    "generation_seconds": [
+      3.148497798,
+      3.148497798
+    ],
+    "verification_seconds": [
+      1.761798054,
+      1.761798054
+    ],
+    "serialization_seconds": [
+      0.03413178,
+      0.03413178
+    ],
+    "accumulator_bytes": [
+      192825,
+      192825
+    ],
+    "packet_bytes": [
+      219421,
+      219421
+    ]
+  },
+  "target_met_all_runs": false
+}

@@ -1,0 +1,42 @@
+{
+  "profile": "isolated complete production CRT dimension v3 + sprod6 + scratch pool1024",
+  "complete_show_generation_s": [
+    3.378518,
+    3.303526,
+    2.882511,
+    3.11063,
+    3.519819
+  ],
+  "complete_wire_verify_s": [
+    1.665,
+    1.66,
+    1.627,
+    1.676,
+    1.715
+  ],
+  "accumulator_worker_generation_s": [
+    3.305721,
+    3.235388,
+    2.810483,
+    3.035525,
+    3.450743
+  ],
+  "accumulator_worker_verification_s": [
+    1.645463,
+    1.648863,
+    1.615944,
+    1.665337,
+    1.697814
+  ],
+  "accumulator_envelope_KiB_rounded": [
+    188.68,
+    188.68,
+    188.71,
+    188.71,
+    188.68
+  ],
+  "last_actual_envelope_bytes": 193209,
+  "prewarm_excluded": true,
+  "full_show_verified": true,
+  "target_met": false
+}

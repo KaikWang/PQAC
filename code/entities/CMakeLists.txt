@@ -286,6 +286,18 @@ target_link_libraries(revac_acc96_sampleleft_demo PRIVATE revac_entities_core)
 set_target_properties(revac_acc96_sampleleft_demo PROPERTIES
   BUILD_RPATH "${CORE_DIR}/lib")
 
+add_executable(revac_acc96_fresh_gate_demo
+  "${ENTITIES_DIR}/test/revac_acc96_fresh_gate_demo.c")
+target_link_libraries(revac_acc96_fresh_gate_demo PRIVATE revac_entities_core)
+set_target_properties(revac_acc96_fresh_gate_demo PROPERTIES
+  BUILD_RPATH "${CORE_DIR}/lib")
+
+add_executable(revac_acc96_fresh_sync_demo
+  "${ENTITIES_DIR}/test/revac_acc96_fresh_sync_demo.c")
+target_link_libraries(revac_acc96_fresh_sync_demo PRIVATE revac_entities_core)
+set_target_properties(revac_acc96_fresh_sync_demo PROPERTIES
+  BUILD_RPATH "${CORE_DIR}/lib")
+
 add_executable(revac_context_demo
   "${ENTITIES_DIR}/test/revac_context_demo.c")
 target_link_libraries(revac_context_demo PRIVATE revac_entities_core)
@@ -346,6 +358,8 @@ add_test(NAME revac_acc96_gaussian_mpfr_demo
   COMMAND revac_acc96_gaussian_mpfr_demo)
 add_test(NAME revac_acc96_samplefz_demo COMMAND revac_acc96_samplefz_demo)
 add_test(NAME revac_acc96_sampleleft_demo COMMAND revac_acc96_sampleleft_demo)
+add_test(NAME revac_acc96_fresh_gate_demo COMMAND revac_acc96_fresh_gate_demo)
+add_test(NAME revac_acc96_fresh_sync_demo COMMAND revac_acc96_fresh_sync_demo)
 add_test(NAME revac_same_x_zk_demo
   COMMAND "${REVAC_LAZER_PYTHON}" "${ENTITIES_DIR}/zk_lazer/revac_same_x_demo.py")
 add_test(NAME revac_memver_quadratic_zk_demo

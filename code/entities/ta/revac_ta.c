@@ -879,6 +879,7 @@ int revac_ta_export_memwitsync(const revac_ta_t *ta,
                           &ta->acc96_state->trapdoor,
                           &ta->acc96_state->accumulator, request->handle,
                           ta->acc96_sampler_opaque, &ta->acc96_ctx) &&
+        acc96_relation_fresh_witness_check(witness96, &ta->acc96_ctx) &&
         acc96_relation_memver(&ta->acc96_state->pp,
                               &ta->acc96_state->accumulator,
                               request->handle, witness96,

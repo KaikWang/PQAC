@@ -1,0 +1,113 @@
+{
+  "date": "2026-10-13",
+  "server": "autodl-pqa11",
+  "cpu": "Intel Xeon Gold 6430",
+  "profile": "production q88 candidate D, three-prime CRT",
+  "repetitions": 5,
+  "baseline_source_modified": false,
+  "generation_components_parallel": true,
+  "timing_scope": "warm online measurements; prewarm excluded",
+  "prewarm_seconds": {
+    "prover": 5.916,
+    "verifier": 2.111
+  },
+  "complete_show_generation_seconds": {
+    "samples": [
+      5.31449,
+      5.348532,
+      5.156323,
+      5.485187,
+      5.259013
+    ],
+    "mean": 5.312709,
+    "minimum": 5.156323,
+    "maximum": 5.485187
+  },
+  "complete_show_wire_verification_seconds": {
+    "samples": [
+      2.822,
+      2.853,
+      2.833,
+      2.87,
+      2.731
+    ],
+    "mean": 2.8218,
+    "minimum": 2.731,
+    "maximum": 2.87
+  },
+  "accumulator_worker_generation_seconds": {
+    "samples": [
+      5.252937,
+      5.277987,
+      5.07549,
+      5.416649,
+      5.196384
+    ],
+    "mean": 5.2438894000000005,
+    "minimum": 5.07549,
+    "maximum": 5.416649
+  },
+  "accumulator_worker_verification_seconds": {
+    "samples": [
+      2.80887,
+      2.841808,
+      2.822103,
+      2.860517,
+      2.719892
+    ],
+    "mean": 2.810638,
+    "minimum": 2.719892,
+    "maximum": 2.860517
+  },
+  "native_pack_generation_seconds": {
+    "samples": [
+      5.238828,
+      5.265261,
+      5.063477,
+      5.40378,
+      5.181336
+    ],
+    "mean": 5.2305364,
+    "minimum": 5.063477,
+    "maximum": 5.40378
+  },
+  "native_pack_verification_seconds": {
+    "samples": [
+      2.796524,
+      2.829089,
+      2.808568,
+      2.846164,
+      2.706379
+    ],
+    "mean": 2.7973448,
+    "minimum": 2.706379,
+    "maximum": 2.846164
+  },
+  "accumulator_envelope_kib_rounded": {
+    "samples": [
+      194.38,
+      194.0,
+      194.47,
+      194.5,
+      194.5
+    ],
+    "mean": 194.37,
+    "minimum": 194.0,
+    "maximum": 194.5
+  },
+  "compressed_complete_show_packet_kib_rounded": {
+    "samples": [
+      212.9,
+      219.11,
+      213.68,
+      213.66,
+      213.64
+    ],
+    "mean": 214.598,
+    "minimum": 212.9,
+    "maximum": 219.11
+  },
+  "last_accumulator_envelope_bytes": 199170,
+  "all_five_pack_verify_passed": true,
+  "entity_integration_passed": true
+}
