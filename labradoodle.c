@@ -18,6 +18,14 @@
 #include "polx.h"
 #include "polz.h"
 
+static size_t q88_batch_audit_calls, q88_fused_audit_calls;
+__attribute__((destructor)) static void q88_kernel_audit_report(void)
+{
+  if(getenv("REVAC_Q88_KERNEL_AUDIT") != NULL)
+    fprintf(stderr, "[q88 kernel audit] batch_reference_checks=%zu fused_reference_checks=%zu\n",
+            q88_batch_audit_calls, q88_fused_audit_calls);
+}
+
 static int ldd_kernel_threads(const char *variable, size_t work)
 {
 #ifdef _OPENMP
@@ -71,7 +79,7 @@ static int ldd_exact_product_required(const polxvec r,
   return max_width <= 0.0 || 0.5 * log2(max_width) >= 75.0;
 }
 
-static void ldd_split_mul_add(polxvec r, const polxvec a, const polxvec b)
+static void ldd_split_mul_add_reference(polxvec r, const polxvec a, const polxvec b)
 {
   /* Decomposition digits are stored in int16_t poly coefficients. */
   const size_t bits = 13;
@@ -95,6 +103,75 @@ static void ldd_split_mul_add(polxvec r, const polxvec a, const polxvec b)
   }
   polxvec_free(digit);
   polxvec_free(term);
+}
+
+static void ldd_split_mul_add(polxvec r, const polxvec a, const polxvec b)
+{
+  const char *mode = getenv("REVAC_Q88_BATCH_SPLIT");
+  if(LOGQ != 38 || K != 6 || r->stride != 1 ||
+      mode == NULL || mode[0] == '0' || mode[0] == '\0'){
+    ldd_split_mul_add_reference(r, a, b);
+    return;
+  }
+  const size_t bits = 13, limbs = (LOGQ + bits - 1) / bits;
+  poly digits[limbs];
+  polxvec digit, term, reference;
+  const int audit = mode[0] == '2';
+  if(audit){
+    polxvec_init(reference, r->len, 1);
+    polxvec_copy(reference, r);
+    ldd_split_mul_add_reference(reference, a, b);
+  }
+  /* Keep the original first-limb reduction, so the intermediate accumulator
+   * is centered modulo q without an extra exact conversion. Remaining terms
+   * are centered before scaling. LOGQ=38 has largest scale 2**26: their
+   * total is below 2**65 per coefficient, far inside the six-prime CRT range.
+   * The last two accumulator reductions can therefore be combined. */
+  polxvec_exact_decompose(digits, a, 1, limbs, bits);
+  polxvec_init(digit, 1, 1);
+  polxvec_init(term, b->len, 1);
+  for(size_t limb=0;limb<limbs;limb++){
+    polxvec_frompolyvec(digit, &digits[limb], 1, 1, WIDTHMOD(bits));
+    polxvec_mul(term, digit, b);
+    polxvec_refresh(term);
+    polxvec_scale_add(r, term, (int64_t)1 << (bits * limb));
+    if(limb == 0) polxvec_refresh(r);
+  }
+  polxvec_refresh(r);
+  if(audit){
+    for(size_t prime=0;prime<K;prime++){
+      if(memcmp(r->proj[prime], reference->proj[prime], r->len * sizeof(poly)) != 0){
+        fprintf(stderr, "q88 batched split differs from reference\n");
+        abort();
+      }
+    }
+    polxvec_free(reference);
+    __atomic_fetch_add(&q88_batch_audit_calls, 1, __ATOMIC_RELAXED);
+  }
+  polxvec_free(digit);
+  polxvec_free(term);
+}
+
+static void ldd_fused_weighted_phi(polxvec out, const polxvec phi[],
+                                   polx coefficients[], size_t count)
+{
+  const size_t blocks = (out->len + 31) / 32;
+  const int threads = ldd_kernel_threads("REVAC_Q88_FUSED_LING_THREADS", blocks);
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(threads) \
+      if(threads > 1 && !omp_in_parallel()) schedule(static)
+  #endif
+  for(size_t block=0;block<blocks;block++){
+    const size_t offset = block * 32;
+    polxvec dest, source;
+    for(size_t i=0;i<count;i++){
+      if(offset >= phi[i]->len) continue;
+      const size_t len = MIN(32, phi[i]->len - offset);
+      polxvec_init_subvec2(dest, out, offset, 1, len);
+      polxvec_init_subvec2(source, phi[i], offset, 1, len);
+      polxvec_polx_mul_add(dest, coefficients[i], source);
+    }
+  }
 }
 
 static void ldd_collapse_jl(
@@ -574,9 +651,34 @@ static void ldd_addcheck_ling(
   polxvec_init(c->lin->phi[0], pp->nmax, 1);
   polxvec_setzero(c->lin->phi[0], 0, 1, c->lin->phi[0]->len);
 
-  for(i=0;i<pp->r;i++){
-    polxvec_init_subvec(c->lin->phi[0], c->lin->phi[0], 0, 1, phi[i]->len);
-    polxvec_polx_mul_add(c->lin->phi[0], chalx_amortize[i], phi[i]);
+  const char *fused = getenv("REVAC_Q88_FUSED_LING");
+  if(fused != NULL && fused[0] != '\0' && fused[0] != '0'){
+    ldd_fused_weighted_phi(c->lin->phi[0], phi, chalx_amortize, pp->r);
+    if(fused[0] == '2'){
+      polxvec reference;
+      polxvec_init(reference, pp->nmax, 1);
+      polxvec_setzero(reference, 0, 1, pp->nmax);
+      for(i=0;i<pp->r;i++){
+        polxvec_init_subvec(reference, reference, 0, 1, phi[i]->len);
+        polxvec_polx_mul_add(reference, chalx_amortize[i], phi[i]);
+      }
+      polxvec_init_subvec(reference, reference, 0, 1, 0);
+      for(size_t prime=0;prime<K;prime++){
+        if(memcmp(c->lin->phi[0]->proj[prime], reference->proj[prime],
+                  pp->nmax * sizeof(poly)) != 0){
+          fprintf(stderr, "q88 fused phi differs from reference\n");
+          abort();
+        }
+      }
+      polxvec_free(reference);
+      __atomic_fetch_add(&q88_fused_audit_calls, 1, __ATOMIC_RELAXED);
+    }
+  }
+  else{
+    for(i=0;i<pp->r;i++){
+      polxvec_init_subvec(c->lin->phi[0], c->lin->phi[0], 0, 1, phi[i]->len);
+      polxvec_polx_mul_add(c->lin->phi[0], chalx_amortize[i], phi[i]);
+    }
   }
   polxvec_init_subvec(c->lin->phi[0], c->lin->phi[0], 0, 1, 0);
 

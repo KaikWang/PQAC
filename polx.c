@@ -9,6 +9,7 @@
 #include "poly.h"
 #include "polz.h"
 #include "revac_profile.h"
+#include "scratch_pool.h"
 
 static int64_t cmodq(int64_t a) {
   int64_t t;
@@ -198,7 +199,7 @@ void polxvec_init(polxvec r, size_t len, int widths) {
   r->alloc = r->len = len;
   r->off = 0;
   r->stride = 1;
-  buf = _aligned_alloc(64,len*K*sizeof(poly));
+  buf = q88_pool_take(len*K*sizeof(poly));
   for(i=0;i<K;i++) {
     r->proj[i] = buf;
     buf = &r->proj[i][len];
@@ -266,7 +267,7 @@ void polxvec_init_frompolx(polxvec r, polx a) {
 
 void polxvec_free(polxvec r) {
   if(!r->alloc) return;
-  free(&r->proj[0][-r->off]);
+  q88_pool_give(&r->proj[0][-r->off],r->alloc*K*sizeof(poly));
   free(&r->widths[-r->off]);
   r->alloc = 0;
 }
@@ -953,6 +954,14 @@ void polxvec_sprod(polxvec r, const polxvec a, const polxvec b) {
     assert(*r->widths <= MAXWIDTH);
   }
   if(revac_cuda_sprod(r, a, b)) return;
+  /* Each prime projection owns a separate output. Preserve the original
+     reduction order within each projection; avoid nested OpenMP teams. */
+  const int sprod_threads = revac_polxvec_kernel_threads(
+      "REVAC_Q88_SPROD_THREADS", K);
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(sprod_threads) \
+      if(sprod_threads > 1 && a->len >= 256 && !omp_in_parallel()) schedule(static)
+  #endif
   for(i=0;i<K;i++)
     polyvec_sprod_pointwise(*r->proj[i],a->proj[i],b->proj[i],a->stride,b->stride,a->len,primes[i]);
 }
@@ -968,6 +977,14 @@ void polxvec_sprod_add(polxvec r, const polxvec a, const polxvec b) {
       *r->widths += N*a->widths[i*a->stride]*b->widths[i*b->stride];
     assert(*r->widths <= MAXWIDTH);
   }
+  /* Each prime projection owns a separate output. Preserve the original
+     reduction order within each projection; avoid nested OpenMP teams. */
+  const int sprod_threads = revac_polxvec_kernel_threads(
+      "REVAC_Q88_SPROD_THREADS", K);
+  #ifdef _OPENMP
+  #pragma omp parallel for num_threads(sprod_threads) \
+      if(sprod_threads > 1 && a->len >= 256 && !omp_in_parallel()) schedule(static)
+  #endif
   for(i=0;i<K;i++)
     polyvec_sprod_pointwise_add(*r->proj[i],a->proj[i],b->proj[i],a->stride,b->stride,a->len,primes[i]);
   polxvec_reduce(r);
